@@ -1,0 +1,6 @@
+{
+  "name": "Sd IDE",
+  "description": "IDE di động cho ngôn ngữ Sd, Sd++ và .sdall theo giáo trình Sd & Sd++ 2.0 với trình thông dịch, gỡ lỗi từng bước, thanh ghi mô phỏng, Heap và sinh mã C (sdc).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,5 @@
+iid: sta(fn) => rtn:
+sta square(int value) -> int{
+    iid: ref* value * value ed
+}
+fn ed
