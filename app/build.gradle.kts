@@ -11,6 +11,7 @@ plugins {
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
+  flavorDimensions += "distribution"
 
   defaultConfig {
     applicationId = "com.aistudio.sdide.kvnqmp"
@@ -20,6 +21,13 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  productFlavors {
+    create("standalone") {
+      dimension = "distribution"
+      applicationIdSuffix = ".standalone"
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

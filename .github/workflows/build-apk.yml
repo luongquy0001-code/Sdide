@@ -1,0 +1,58 @@
+name: Build Sd IDE APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create temporary standalone debug key
+        run: |
+          keytool -genkeypair \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Sd IDE Standalone Debug,O=Sd IDE,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -noprompt
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Build standalone APK
+        run: gradle :app:assembleStandaloneDebug
+
+      - name: Prepare APK file
+        run: |
+          cp app/build/outputs/apk/standalone/debug/app-standalone-debug.apk Sd-IDE-Moi-Android.apk
+          $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose Sd-IDE-Moi-Android.apk
+
+      - name: Publish direct APK to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="sdide-standalone-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" Sd-IDE-Moi-Android.apk \
+            --title "Sd IDE Mới (Android) #${GITHUB_RUN_NUMBER}" \
+            --notes "Cài song song với Sd IDE hiện tại. Tên gói: com.aistudio.sdide.kvnqmp.standalone. Dữ liệu ứng dụng tách riêng. Đây là APK debug ký bằng khóa tạm; các bản phát hành sau có thể không cài cập nhật đè lên bản này."
