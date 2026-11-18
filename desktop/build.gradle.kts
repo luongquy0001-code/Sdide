@@ -42,7 +42,7 @@ tasks.jar {
 }
 
 tasks.register<Exec>("packageWindows") {
-  dependsOn(tasks.named("installDist"))
+  dependsOn(tasks.named("test"), tasks.named("installDist"))
 
   val appDirectory = layout.buildDirectory.dir("install/desktop/lib").get().asFile
   val outputDirectory = layout.buildDirectory.dir("installer").get().asFile

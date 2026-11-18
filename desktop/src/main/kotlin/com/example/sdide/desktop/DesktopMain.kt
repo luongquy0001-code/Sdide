@@ -17,6 +17,7 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.GraphicsEnvironment
 import java.awt.GridLayout
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -29,6 +30,7 @@ import java.util.Locale
 import java.util.prefs.Preferences
 import java.util.concurrent.Executors
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JFileChooser
 import javax.swing.JFrame
@@ -42,6 +44,7 @@ import javax.swing.JTextField
 import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
+import javax.swing.filechooser.FileFilter
 import javax.swing.filechooser.FileNameExtensionFilter
 
 fun main() {
@@ -70,6 +73,11 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
   private val breakpoints = linkedSetOf<Int>()
   private var editorFontSize = preferences.getInt("fontSize", 14).coerceIn(11, 22)
   private var darkTheme = preferences.getBoolean("darkTheme", true)
+  private var editorTabSize = preferences.getInt("tabSize", 4).coerceIn(2, 8)
+  private var editorWordWrap = preferences.getBoolean("wordWrap", false)
+  private var editorFontFamily = preferences.get("fontFamily", Font.MONOSPACED)
+  private var nativeCompilerPath = preferences.get("nativeCompilerPath", "")
+  private var nativeOptimization = preferences.get("nativeOptimization", "-O2")
   private val themeButton = JButton(if (darkTheme) "Sáng" else "Tối")
 
   init {
@@ -78,8 +86,9 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     setSize(1100, 760)
     setLocationRelativeTo(null)
 
-    editor.font = Font(Font.MONOSPACED, Font.PLAIN, 14)
-    editor.tabSize = 4
+    editor.tabSize = editorTabSize
+    editor.lineWrap = editorWordWrap
+    editor.wrapStyleWord = true
     output.font = Font(Font.MONOSPACED, Font.PLAIN, 13)
     output.isEditable = false
     applyEditorPreferences()
@@ -114,6 +123,7 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
         add(button("A−", ::decreaseFontSize))
         add(button("A+", ::increaseFontSize))
         add(themeButton.apply { addActionListener { toggleTheme() } })
+        add(button("Nâng cao…", ::showAdvancedSettings))
       })
     }
 
@@ -865,9 +875,12 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
   }
 
   private fun applyEditorPreferences() {
-    val editorFont = Font(Font.MONOSPACED, Font.PLAIN, editorFontSize)
+    val editorFont = Font(editorFontFamily, Font.PLAIN, editorFontSize)
     editor.font = editorFont
     output.font = editorFont.deriveFont((editorFontSize - 1).coerceAtLeast(10).toFloat())
+    editor.tabSize = editorTabSize
+    editor.lineWrap = editorWordWrap
+    editor.wrapStyleWord = true
     val background = if (darkTheme) java.awt.Color(0x1E, 0x1E, 0x1E) else java.awt.Color.WHITE
     val foreground = if (darkTheme) java.awt.Color(0xDD, 0xDD, 0xDD) else java.awt.Color(0x22, 0x22, 0x22)
     editor.background = background
@@ -897,6 +910,91 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     applyEditorPreferences()
   }
 
+  private fun showAdvancedSettings() {
+    val fontFamilies = (
+      listOf(Font.MONOSPACED, "Consolas", "Cascadia Mono", "Courier New", "Lucida Console") +
+        GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames
+          .filter { it.contains("mono", ignoreCase = true) }
+      ).distinct()
+    val fontPicker = JComboBox(fontFamilies.toTypedArray()).apply {
+      selectedItem = editorFontFamily.takeIf { it in fontFamilies } ?: Font.MONOSPACED
+    }
+    val tabSizePicker = JComboBox(arrayOf(2, 4, 8)).apply {
+      selectedItem = editorTabSize.takeIf { it in setOf(2, 4, 8) } ?: 4
+    }
+    val wrapCheck = JCheckBox("Tự xuống dòng dài", editorWordWrap)
+    val compilerField = JTextField(nativeCompilerPath, 28)
+    val compilerPicker = JPanel(BorderLayout(6, 0)).apply {
+      add(compilerField, BorderLayout.CENTER)
+      add(button("Chọn…") {
+        val chooser = JFileChooser().apply {
+          dialogTitle = "Chọn GCC hoặc Clang"
+          fileSelectionMode = JFileChooser.FILES_ONLY
+          isAcceptAllFileFilterUsed = false
+          addChoosableFileFilter(object : FileFilter() {
+            override fun accept(file: File) =
+              file.isDirectory || file.extension.equals("exe", ignoreCase = true)
+
+            override fun getDescription() = "Chương trình Windows (*.exe)"
+          })
+        }
+        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+          compilerField.text = chooser.selectedFile.absolutePath
+        }
+      }, BorderLayout.EAST)
+    }
+    val optimizationPicker = JComboBox(
+      arrayOf(
+        "-O0 — biên dịch nhanh, dễ gỡ lỗi",
+        "-O2 — cân bằng (khuyến nghị)",
+        "-O3 — ưu tiên tốc độ",
+      ),
+    ).apply {
+      selectedIndex = when (nativeOptimization) {
+        "-O0" -> 0
+        "-O3" -> 2
+        else -> 1
+      }
+    }
+    val settings = JPanel(GridLayout(0, 2, 8, 8)).apply {
+      add(JLabel("Họ font mã nguồn"))
+      add(fontPicker)
+      add(JLabel("Độ rộng phím Tab"))
+      add(tabSizePicker)
+      add(JLabel("Hiển thị mã nguồn"))
+      add(wrapCheck)
+      add(JLabel("GCC/Clang (để trống: tự dò SD_CC/PATH)"))
+      add(compilerPicker)
+      add(JLabel("Tối ưu khi AOT qua C99"))
+      add(optimizationPicker)
+    }
+    val result = JOptionPane.showConfirmDialog(
+      this,
+      settings,
+      "Tuỳ chỉnh nâng cao",
+      JOptionPane.OK_CANCEL_OPTION,
+      JOptionPane.PLAIN_MESSAGE,
+    )
+    if (result != JOptionPane.OK_OPTION) return
+
+    editorFontFamily = fontPicker.selectedItem as? String ?: Font.MONOSPACED
+    editorTabSize = tabSizePicker.selectedItem as? Int ?: 4
+    editorWordWrap = wrapCheck.isSelected
+    nativeCompilerPath = compilerField.text.trim()
+    nativeOptimization = when (optimizationPicker.selectedIndex) {
+      0 -> "-O0"
+      2 -> "-O3"
+      else -> "-O2"
+    }
+    preferences.put("fontFamily", editorFontFamily)
+    preferences.putInt("tabSize", editorTabSize)
+    preferences.putBoolean("wordWrap", editorWordWrap)
+    preferences.put("nativeCompilerPath", nativeCompilerPath)
+    preferences.put("nativeOptimization", nativeOptimization)
+    applyEditorPreferences()
+    status.text = "Đã lưu tuỳ chỉnh nâng cao"
+  }
+
   private fun compileNative() {
     val mainFile = activeFile ?: return
     if (!saveCurrentFile()) return
@@ -923,6 +1021,8 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     }
 
     output.text = "Đang kiểm tra, sinh C99 và gọi GCC/Clang cho $mainFile...\n"
+    val configuredCompiler = nativeCompilerPath.takeIf { it.isNotBlank() }
+    val optimizationFlag = nativeOptimization
     worker.submit {
       try {
         val compilation = SdIdeEngine.compileAndCheck(mainFile, sources)
@@ -943,12 +1043,25 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
 
         val cSource = compilation.cSourceCode
           ?: throw SdNativeCompileException("Không có mã C99 đầu ra để biên dịch.")
-        val result = SdNativeCompiler.compile(cSource, executable)
+        val result = if (configuredCompiler != null) {
+          SdNativeCompiler.compile(
+            cSource = cSource,
+            executable = executable,
+            compilerCandidates = listOf(configuredCompiler),
+            optimizationFlag = optimizationFlag,
+          )
+        } else {
+          SdNativeCompiler.compile(
+            cSource = cSource,
+            executable = executable,
+            optimizationFlag = optimizationFlag,
+          )
+        }
         val warnings = compilation.diagnostics
           .filter { it.severity == DiagnosticSeverity.WARNING }
           .joinToString("\n") { it.format() }
         val text = buildString {
-          appendLine("AOT qua C99 thành công.")
+          appendLine("AOT qua C99 thành công ($optimizationFlag).")
           appendLine("Compiler: ${result.compiler}")
           appendLine("Mã C99: ${result.cSource.absolutePath}")
           appendLine("Chương trình: ${result.executable.absolutePath}")

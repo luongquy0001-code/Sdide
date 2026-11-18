@@ -98,6 +98,11 @@ project data-file management, curriculum samples, and a C99 output viewer. Its
 debugger provides breakpoints, step-into, step-over, continue, and stop; editor
 font size and light/dark colors are configurable.
 
+Windows also has **Nâng cao…** settings for editor font family, tab width, and
+word wrapping, plus an optional GCC/Clang executable path and AOT optimization
+level (`-O0`, `-O2`, or `-O3`). Leaving the compiler path blank uses `SD_CC` or
+searches `PATH`; settings are saved for the current Windows user.
+
 Normal desktop execution skips unused C99 generation and uses the internal VM
 where supported, falling back to the interpreter otherwise. Debugging uses the
 interpreter. The desktop **AOT qua C99** action still invokes installed

@@ -5,7 +5,7 @@ on:
     branches: ["**"]
     paths:
       - "app/src/main/java/com/example/sdide/engine/**"
-      - "app/src/main/java/com/example/sdide/data/CurriculumExamples.kt"
+      - "app/src/main/java/com/example/sdide/data/**"
       - "desktop/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
@@ -14,7 +14,7 @@ on:
   pull_request:
     paths:
       - "app/src/main/java/com/example/sdide/engine/**"
-      - "app/src/main/java/com/example/sdide/data/CurriculumExamples.kt"
+      - "app/src/main/java/com/example/sdide/data/**"
       - "desktop/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
@@ -44,7 +44,7 @@ jobs:
           gradle-version: "9.3.1"
 
       - name: Build Windows installer
-        run: gradle :desktop:packageWindows
+        run: gradle :desktop:test :desktop:packageWindows
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

@@ -174,6 +174,26 @@ class DesktopEngineTest {
   }
 
   @Test
+  fun nativeCompilerRejectsUnsupportedOptimizationSettings() {
+    val directory = Files.createTempDirectory("sdide-native-options-test").toFile()
+    try {
+      val error = assertThrows(SdNativeCompileException::class.java) {
+        SdNativeCompiler.compile(
+          cSource = "int main(void) { return 0; }\n",
+          executable = directory.resolve("program.exe"),
+          compilerCandidates = emptyList(),
+          optimizationFlag = "-O9",
+        )
+      }
+
+      assertTrue(error.message.orEmpty().contains("Mức tối ưu không được hỗ trợ"))
+      assertFalse(directory.resolve("program.c").exists())
+    } finally {
+      Files.deleteIfExists(directory.toPath())
+    }
+  }
+
+  @Test
   fun nativeCompilerBuildsAndRunsTranspiledProgramWhenToolchainExists() {
     val directory = Files.createTempDirectory("sdide-native-run-test").toFile()
     try {

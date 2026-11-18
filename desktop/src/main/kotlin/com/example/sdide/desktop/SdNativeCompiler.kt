@@ -17,12 +17,17 @@ class SdNativeCompileException(message: String) : IllegalStateException(message)
 
 object SdNativeCompiler {
   private const val COMPILE_TIMEOUT_SECONDS = 120L
+  private val SUPPORTED_OPTIMIZATION_FLAGS = setOf("-O0", "-O2", "-O3")
 
   fun compile(
     cSource: String,
     executable: File,
     compilerCandidates: List<String> = defaultCompilerCandidates(),
+    optimizationFlag: String = "-O2",
   ): SdNativeCompilation {
+    if (optimizationFlag !in SUPPORTED_OPTIMIZATION_FLAGS) {
+      throw SdNativeCompileException("Mức tối ưu không được hỗ trợ: $optimizationFlag")
+    }
     val outputDirectory = executable.absoluteFile.parentFile
       ?: throw SdNativeCompileException("Không xác định được thư mục đầu ra native.")
     if (!outputDirectory.exists() && !outputDirectory.mkdirs()) {
@@ -47,7 +52,7 @@ object SdNativeCompiler {
           ProcessBuilder(
             compiler,
             "-std=c99",
-            "-O2",
+            optimizationFlag,
             sourceFile.absolutePath,
             "-o",
             temporaryExecutable.absolutePath,
