@@ -48,16 +48,13 @@ object SdNativeCompiler {
           ?: throw SdNativeCompileException("Không thể tạo tệp nhật ký biên dịch.")
         val temporaryExecutable = stagedExecutable
           ?: throw SdNativeCompileException("Không thể tạo tệp thực thi tạm.")
+        val command = buildList {
+          add(compiler)
+          addAll(listOf("-std=c99", optimizationFlag, sourceFile.absolutePath, "-o", temporaryExecutable.absolutePath))
+          if (!System.getProperty("os.name").startsWith("Windows", true)) add("-lm")
+        }
         val process = try {
-          ProcessBuilder(
-            compiler,
-            "-std=c99",
-            optimizationFlag,
-            sourceFile.absolutePath,
-            "-o",
-            temporaryExecutable.absolutePath,
-            "-lm",
-          )
+          ProcessBuilder(command)
             .directory(outputDirectory)
             .redirectErrorStream(true)
             .redirectOutput(compilerLog)
