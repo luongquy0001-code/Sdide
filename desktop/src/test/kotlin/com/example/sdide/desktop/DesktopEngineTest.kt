@@ -228,7 +228,7 @@ class DesktopEngineTest {
         if (e.message.orEmpty().contains("Không tìm thấy GCC/Clang")) {
           Assume.assumeNoException(e)
         }
-        throw e
+        throw AssertionError("Sd AOT failed: ${e.message}", e)
       }
       val process = ProcessBuilder(native.executable.absolutePath)
         .redirectErrorStream(true)
