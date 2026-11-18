@@ -248,7 +248,11 @@ class DesktopEngineTest {
       val sdppCompilation = SdIdeEngine.compileAndCheck("main.sdpp", mapOf("main.sdpp" to sdppSource))
       assertTrue(sdppCompilation.diagnostics.joinToString { it.format() }, !sdppCompilation.hasErrors)
       val sdppExecutable = directory.resolve(if (System.getProperty("os.name").startsWith("Windows", true)) "sdpp.exe" else "sdpp")
-      val sdppNative = SdNativeCompiler.compile(sdppCompilation.cSourceCode!!, sdppExecutable)
+      val sdppNative = try {
+        SdNativeCompiler.compile(sdppCompilation.cSourceCode!!, sdppExecutable)
+      } catch (e: SdNativeCompileException) {
+        throw AssertionError("SD++ AOT failed: ${e.message}", e)
+      }
       val sdppProcess = ProcessBuilder(sdppNative.executable.absolutePath)
         .redirectErrorStream(true)
         .start()
