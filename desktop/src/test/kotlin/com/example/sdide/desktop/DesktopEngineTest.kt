@@ -236,7 +236,7 @@ class DesktopEngineTest {
       val output = process.inputStream.bufferedReader().use { it.readText() }
 
       assertEquals(0, process.waitFor())
-      assertEquals("8\n", output)
+      assertEquals("8\n", output.replace("\r\n", "\n"))
 
       val sdppSource = """
         ssta {
@@ -259,7 +259,7 @@ class DesktopEngineTest {
       val sdppOutput = sdppProcess.inputStream.bufferedReader().use { it.readText() }
 
       assertEquals(0, sdppProcess.waitFor())
-      assertEquals("native-sdpp\n", sdppOutput)
+      assertEquals("native-sdpp\n", sdppOutput.replace("\r\n", "\n"))
     } finally {
       directory.listFiles()?.forEach { Files.deleteIfExists(it.toPath()) }
       Files.deleteIfExists(directory.toPath())
