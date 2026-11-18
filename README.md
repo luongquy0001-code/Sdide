@@ -26,12 +26,31 @@ a versioned binary token stream. `.sdbin` starts with `SDB1`; `.sdppbin` starts
 with `SPP1`. Each file contains a format version, token count, and token type,
 source position, newline flag, and UTF-8 lexeme for each token. This is a
 portable SdIDE bytecode container, not native CPU machine code or an executable
-binary. Native `.bin` output requires a separate compiler and a specified target
-architecture.
+binary. The Windows desktop app also has an **AOT qua C99** action: it emits
+C99 and invokes an installed GCC/Clang compiler to create a host
+executable under `build/native/`. Install GCC or Clang and make it available on
+`PATH`, or set `SD_CC` to the compiler executable. The generated executable
+targets the current desktop host; it is not an Android binary or a
+`.sdbin`/`.sdppbin` file. Native compilation currently excludes imported
+user-source modules. Android continues to run Sd/Sd++ in the interpreter.
+
+## Internal Sd/Sd++ virtual machine
+
+When running a single-file Sd or Sd++ program without active breakpoints, the
+IDE compiles supported code to an internal stack-based bytecode VM. It runs in
+the app and does not invoke GCC, Clang, Rust, or a network service. The current
+VM subset includes integer/boolean variables and arithmetic, branches,
+`for`/`while`, `brk`/`nxt`, and simple output. Programs using unsupported
+features or active debugging automatically fall back to the existing
+interpreter. The VM bytecode is currently an in-memory execution format; the
+`.sdbin`/`.sdppbin` export remains the separate token-stream format described
+above. This VM is portable, but it is not native machine code. Both Android and the
+Windows desktop app use the VM where supported and fall back to the interpreter
+for unsupported language features or active debugging.
 
 ## Offline Sd / Sd++ libraries
 
-Open the top-right menu and choose **Thư viện Sd / Sd++**. The built-in
+On Android, open the top-right menu and choose **Thư viện Sd / Sd++**. The built-in
 `ioprt`, `math`, `str`, `mem`, `file`, `sys`, and `draw` APIs are already part
 of the interpreter. Install or remove additional source modules from `.sdlib`
 files; installed modules are available to both live diagnostics and program
@@ -56,20 +75,43 @@ across installed packages are rejected. Only `.sd` and `.sdpp` source files are
 accepted. This milestone does not add C/C++ or Rust native-library loading or an
 online registry.
 
+The desktop IDE can create a `.sdlib` from the `.sd` and `.sdpp` files in the
+open project using **Thư viện → Đóng gói dự án hiện tại**. Choose the package
+name, version, description, entry module, and output path; the package is
+validated against the same limits and its modules are imported through the
+Sd/Sd++ front end before it is written. The Windows app can install and remove
+local `.sdlib` packages and use their modules in execution and bytecode export.
+The Android IDE can also build a `.sdlib` from the current project's `.sd` and
+`.sdpp` files, save it through Android's document picker, then install or share
+it from **Thư viện Sd / Sd++**.
+
 The sample package [`examples/mathplus.sdlib`](./examples/mathplus.sdlib)
 installs a `mathplus` module with `square(int)`. After installing it, use
 `imp*mathplus.ed` and call `mathplus.square(7)`.
 
 ## Windows desktop version
 
-The Windows desktop app shares the Sd interpreter and source-file formats with
-the Android app. It supports opening a project folder, editing `.sd`, `.sdpp`,
-`.sdall`, and `.txt` files, and running programs. It is a separate desktop
-interface; Android-specific screens and controls are not included.
+The Windows desktop app shares the Sd engine and source-file formats with the
+Android app. It supports project and source import/export, creating and deleting
+source files, bytecode export, local library install/uninstall/package creation,
+project data-file management, curriculum samples, and a C99 output viewer. Its
+debugger provides breakpoints, step-into, step-over, continue, and stop; editor
+font size and light/dark colors are configurable.
+
+Normal desktop execution skips unused C99 generation and uses the internal VM
+where supported, falling back to the interpreter otherwise. Debugging uses the
+interpreter. The desktop **AOT qua C99** action still invokes installed
+GCC/Clang, and currently cannot compile programs that import user-source
+modules. This is not a self-hosted compiler or direct machine-code backend.
 
 To create a Windows installer, run the **Build Sd IDE Windows installer**
 workflow on GitHub Actions and download the `Sd-IDE-Windows-Installer` artifact.
 The installer is built on Windows and includes its Java runtime.
+
+The standalone Android debug build uses the app name **Sd IDE Mới** and package
+ID `com.aistudio.sdide.kvnqmp.standalone`, so it can be installed alongside the
+existing app. It has separate app data; projects and libraries are not copied
+from the existing installation.
 
 To move a project between Android and Windows, copy its source files and
 `.sdide_entry` marker into a folder, then open that folder in the Windows app.

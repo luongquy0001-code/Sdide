@@ -84,6 +84,7 @@ import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.SdOrangeLight
 import com.example.ui.theme.SdppLimeBright
 import com.example.ui.theme.WarnAmber
+import com.example.sdide.data.SdLibraryInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +97,8 @@ fun IdeScreen(
   var showMoreMenu by remember { mutableStateOf(false) }
   var isWorkbenchExpanded by remember { mutableStateOf(true) }
   var pendingDataExport by remember { mutableStateOf<String?>(null) }
+  var pendingLibraryExport by remember { mutableStateOf<SdLibraryInfo?>(null) }
+  var showLibraryBuildDialog by remember { mutableStateOf(false) }
   val snackbarHostState = remember { SnackbarHostState() }
   val sourceImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     uri?.let(vm::importSourceFile)
@@ -105,6 +108,13 @@ fun IdeScreen(
   }
   val libraryImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     uri?.let(vm::installSdLibrary)
+  }
+  val libraryExportLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.CreateDocument("application/zip"),
+  ) { uri ->
+    val library = pendingLibraryExport
+    pendingLibraryExport = null
+    if (uri != null && library != null) vm.exportSdLibrary(library, uri)
   }
   val sourceExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
     uri?.let(vm::exportActiveSource)
@@ -484,7 +494,25 @@ fun IdeScreen(
       installedLibraries = state.installedLibraries,
       onDismiss = { vm.setLibraryManagerVisible(false) },
       onInstallFromFile = { libraryImportLauncher.launch(arrayOf("*/*")) },
+      onBuildPackage = {
+        vm.setLibraryManagerVisible(false)
+        showLibraryBuildDialog = true
+      },
+      sourceFiles = state.files,
       onUninstall = vm::uninstallSdLibrary,
+    )
+  }
+
+  if (showLibraryBuildDialog) {
+    BuildSdLibraryDialog(
+      sourceFiles = state.files.filterKeys { it.endsWith(".sd", true) || it.endsWith(".sdpp", true) },
+      defaultEntryFile = state.activeFile,
+      onDismiss = { showLibraryBuildDialog = false },
+      onBuild = { library ->
+        pendingLibraryExport = library
+        showLibraryBuildDialog = false
+        libraryExportLauncher.launch("${library.name}.sdlib")
+      },
     )
   }
 

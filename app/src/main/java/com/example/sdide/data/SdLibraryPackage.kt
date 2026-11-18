@@ -3,8 +3,11 @@ package com.example.sdide.data
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.StringWriter
 import java.util.Properties
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class SdLibraryInfo(
   val name: String,
@@ -29,6 +32,59 @@ object SdLibraryPackage {
   fun readPackageBytes(input: InputStream): ByteArray {
     val bytes = input.readBounded(MAX_PACKAGE_BYTES)
     require(bytes.isNotEmpty()) { "Gói thư viện đang trống." }
+    return bytes
+  }
+
+  fun encode(library: SdLibraryInfo): ByteArray {
+    require(LIBRARY_NAME.matches(library.name)) {
+      "Tên thư viện chỉ được gồm chữ thường, số, gạch ngang và gạch dưới."
+    }
+    require(library.version.isNotBlank() && library.version.trim().length <= 64) {
+      "Phiên bản thư viện không hợp lệ."
+    }
+    require(library.description.trim().length <= 512) { "Mô tả thư viện quá dài." }
+    require(library.sourceFiles.size in 1..MAX_SOURCE_FILES) {
+      "Gói phải có từ 1 đến $MAX_SOURCE_FILES tệp mã nguồn."
+    }
+
+    var totalSourceBytes = 0
+    for ((name, source) in library.sourceFiles) {
+      require(SOURCE_FILE.matches(name)) { "Tên tệp nguồn không hợp lệ: $name" }
+      val sourceBytes = source.toByteArray(Charsets.UTF_8)
+      require(sourceBytes.size <= MAX_SOURCE_BYTES) { "Tệp nguồn '$name' vượt quá 1 MiB." }
+      totalSourceBytes += sourceBytes.size
+      require(totalSourceBytes <= MAX_PACKAGE_BYTES) { "Tổng mã nguồn trong gói vượt quá giới hạn." }
+    }
+    require(library.sourceFiles.keys.map { it.substringBeforeLast('.').lowercase() }.distinct().size ==
+      library.sourceFiles.size
+    ) {
+      "Gói không được có hai tệp cùng tên module."
+    }
+    require(SOURCE_FILE.matches(library.entryFile) && library.entryFile in library.sourceFiles) {
+      "Tệp entry phải trỏ tới một tệp .sd hoặc .sdpp trong src/."
+    }
+
+    val properties = Properties().apply {
+      setProperty("format", FORMAT_VERSION)
+      setProperty("name", library.name)
+      setProperty("version", library.version.trim())
+      setProperty("description", library.description.trim())
+      setProperty("entry", library.entryFile)
+    }
+    val manifest = StringWriter().also { properties.store(it, null) }.toString()
+      .toByteArray(Charsets.UTF_8)
+    require(manifest.size <= 16 * 1024) { "Tệp manifest vượt quá giới hạn." }
+
+    val output = ByteArrayOutputStream()
+    ZipOutputStream(output, Charsets.UTF_8).use { zip ->
+      zip.writeEntry("manifest.properties", manifest)
+      for ((name, source) in library.sourceFiles.toSortedMap()) {
+        zip.writeEntry("src/$name", source.toByteArray(Charsets.UTF_8))
+      }
+    }
+    val bytes = output.toByteArray()
+    require(bytes.size <= MAX_PACKAGE_BYTES) { "Gói thư viện vượt quá 8 MiB." }
+    decode(bytes)
     return bytes
   }
 
@@ -104,6 +160,12 @@ object SdLibraryPackage {
       output.write(buffer, 0, count)
     }
     return output.toByteArray()
+  }
+
+  private fun ZipOutputStream.writeEntry(path: String, contents: ByteArray) {
+    putNextEntry(ZipEntry(path).apply { time = 0L })
+    write(contents)
+    closeEntry()
   }
 
   private val LIBRARY_NAME = Regex("[a-z][a-z0-9_-]{0,47}")

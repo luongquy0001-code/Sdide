@@ -16,7 +16,18 @@ kotlin {
     kotlin.srcDir("../app/src/main/java/com/example/sdide/engine")
     kotlin.srcDir("../app/src/main/java/com/example/sdide/data")
     kotlin.include("**/*.kt")
-    kotlin.exclude("ProjectRepository.kt", "SdLibraryPackage.kt")
+    kotlin.exclude("ProjectRepository.kt")
+  }
+  sourceSets.test {
+    kotlin.srcDir("../app/src/test/java")
+    kotlin.include(
+      "**/DesktopEngineTest.kt",
+      "**/SdEngineComprehensiveTest.kt",
+      "**/SdBytecodeCompilerTest.kt",
+      "**/SdLibraryPackageTest.kt",
+      "**/SdLibraryBuildServiceTest.kt",
+      "**/DesktopLibraryRepositoryTest.kt",
+    )
   }
 }
 

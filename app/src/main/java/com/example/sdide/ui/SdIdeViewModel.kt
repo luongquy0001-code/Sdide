@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.sdide.data.IdePreferences
 import com.example.sdide.data.ProjectRepository
 import com.example.sdide.data.SampleProject
+import com.example.sdide.data.SdLibraryBuildService
 import com.example.sdide.data.SdLibraryInfo
 import com.example.sdide.data.SdLibraryPackage
 import com.example.sdide.engine.DebugCommand
@@ -36,6 +37,9 @@ import java.util.concurrent.LinkedBlockingQueue
 enum class WorkbenchTab {
   CONSOLE, PROBLEMS, DEBUGGER, STDIN, DRAW
 }
+
+private const val LIVE_OUTPUT_BATCH_CHARS = 16 * 1024
+private const val LIVE_OUTPUT_BATCH_INTERVAL_NANOS = 100_000_000L
 
 data class IdeUiState(
   val projectName: String = "Sd IDE",
@@ -304,8 +308,8 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun setCViewerVisible(visible: Boolean) {
-    if (visible) runStaticCheck()
     _uiState.update { it.copy(showCViewer = visible) }
+    if (visible) runStaticCheck()
   }
 
   fun setStorageManagerVisible(visible: Boolean) {
@@ -352,6 +356,26 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
         runStaticCheck()
         _uiState.update { it.copy(fileMessage = "Đã gỡ thư viện $name") }
       } catch (e: IOException) {
+        reportFileError(e)
+      } catch (e: IllegalArgumentException) {
+        reportFileError(e)
+      } catch (e: IllegalStateException) {
+        reportFileError(e)
+      }
+    }
+  }
+
+  fun exportSdLibrary(library: SdLibraryInfo, uri: Uri) {
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val bytes = SdLibraryBuildService.build(library)
+        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+          ?.use { it.write(bytes) }
+          ?: throw IOException("Không thể ghi gói thư viện vào vị trí đã chọn.")
+        _uiState.update { it.copy(fileMessage = "Đã tạo thư viện ${library.name} ${library.version}") }
+      } catch (e: IOException) {
+        reportFileError(e)
+      } catch (e: SecurityException) {
         reportFileError(e)
       } catch (e: IllegalArgumentException) {
         reportFileError(e)
@@ -598,7 +622,11 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
 
   fun runStaticCheck() {
     val st = _uiState.value
-    val res = SdIdeEngine.compileAndCheck(st.entryFile, compilationFiles(st.files))
+    val res = SdIdeEngine.compileAndCheck(
+      st.entryFile,
+      compilationFiles(st.files),
+      includeCSource = st.showCViewer,
+    )
     _uiState.update {
       it.copy(
         diagnostics = res.diagnostics,
@@ -622,11 +650,32 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
     val stdinQueue = LinkedBlockingQueue<String>(initialStdinLines.ifEmpty { emptyList() })
     activeInteractiveStdinQueue = stdinQueue
 
+    val liveOutput = StringBuilder()
+    var publishedOutputLength = 0
+    var lastOutputPublishNanos = System.nanoTime()
+    fun publishLiveOutput(force: Boolean = false) {
+      val pendingChars = liveOutput.length - publishedOutputLength
+      if (pendingChars == 0) return
+      val now = System.nanoTime()
+      if (!force &&
+        pendingChars < LIVE_OUTPUT_BATCH_CHARS &&
+        now - lastOutputPublishNanos < LIVE_OUTPUT_BATCH_INTERVAL_NANOS
+      ) {
+        return
+      }
+
+      val snapshot = liveOutput.toString()
+      publishedOutputLength = snapshot.length
+      lastOutputPublishNanos = now
+      _uiState.update { it.copy(consoleOutput = snapshot) }
+    }
+
     val stdinProvider = object : StdinProvider {
       override fun readNextLine(promptHint: String): String? {
         val prefilled = stdinQueue.poll()
         if (prefilled != null) return prefilled
         // Pause and wait interactively from user UI
+        publishLiveOutput(force = true)
         _uiState.update {
           it.copy(
             waitingForStdinPrompt = promptHint,
@@ -659,9 +708,8 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
         }
       },
       onOutputCallback = { chunk ->
-        _uiState.update {
-          it.copy(consoleOutput = it.consoleOutput + chunk)
-        }
+        liveOutput.append(chunk)
+        publishLiveOutput()
       },
     )
     activeDebugController = controller
@@ -687,6 +735,7 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
         stdinProvider = stdinProvider,
         fileBridge = repo.createFileBridge(),
         debugController = controller,
+        includeCSource = false,
       )
 
       val errorLogs = result.diagnostics

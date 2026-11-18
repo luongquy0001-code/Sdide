@@ -157,6 +157,10 @@ class SdInterpreter(
       vars[name] = box
     }
 
+    fun clear() {
+      vars.clear()
+    }
+
     fun resolve(name: String): MutableBox? = vars[name] ?: parent?.resolve(name)
   }
 
@@ -305,39 +309,88 @@ class SdInterpreter(
     }
   }
 
+  private fun createLoopCondition(expr: Expr, scope: RuntimeScope, env: ModuleEnv): () -> Boolean {
+    val comparison = expr as? Expr.BinaryExpr
+      ?: return { asBool(evalExpr(expr, scope, env), expr.pos) }
+    if (comparison.op !in setOf("<", "<=", ">", ">=", "==", "!=")) {
+      return { asBool(evalExpr(expr, scope, env), expr.pos) }
+    }
+
+    val left = bindIntLoopOperand(comparison.left, scope)
+      ?: return { asBool(evalExpr(expr, scope, env), expr.pos) }
+    val right = bindIntLoopOperand(comparison.right, scope)
+      ?: return { asBool(evalExpr(expr, scope, env), expr.pos) }
+
+    return {
+      val leftValue = left()
+      val rightValue = right()
+      if (leftValue == null || rightValue == null) {
+        asBool(evalExpr(expr, scope, env), expr.pos)
+      } else {
+        when (comparison.op) {
+          "<" -> leftValue < rightValue
+          "<=" -> leftValue <= rightValue
+          ">" -> leftValue > rightValue
+          ">=" -> leftValue >= rightValue
+          "==" -> leftValue == rightValue
+          else -> leftValue != rightValue
+        }
+      }
+    }
+  }
+
+  private fun bindIntLoopOperand(expr: Expr, scope: RuntimeScope): (() -> Long?)? {
+    return when (expr) {
+      is Expr.IntLit -> {
+        val value = SdTypeUtils.checkSafeInt(expr.value, expr.pos.line, expr.pos.col, expr.pos.fileName)
+        ({ value })
+      }
+      is Expr.VarExpr -> {
+        val box = scope.resolve(expr.name) ?: return null
+        { (box.value as? SdValue.IntVal)?.value }
+      }
+      is Expr.GlobalVarExpr -> {
+        val box = globalScope.resolve(expr.name) ?: return null
+        { (box.value as? SdValue.IntVal)?.value }
+      }
+      else -> null
+    }
+  }
+
   private fun checkStepAndDebug(pos: SourcePos) {
     stepCount++
     if (stepCount > MAX_STEPS) {
       throw SdRuntimeException(SdDiagnostic("E501", 4, pos.line, pos.col, pos.fileName, "vượt quá giới hạn $MAX_STEPS bước thực thi"))
     }
-    val curFrame = callStack.lastOrNull()
-    if (curFrame != null) curFrame.currentLine = pos.line
-
     val dbg = debugController ?: return
     if (dbg.cancelled) throw DebugStopSignal()
 
-    val isMainFile = pos.fileName == null || mainFileName == null || pos.fileName == mainFileName
-    val hitBreakpoint = isMainFile && pos.line in dbg.breakpoints
-    val hitStepOver = dbg.stepOverDepth != null && callStack.size <= dbg.stepOverDepth!!
-    val shouldPause = hitBreakpoint || dbg.stepMode || hitStepOver
+    val stepOverDepth = dbg.stepOverDepth
+    val breakpoints = dbg.breakpoints
+    if (!dbg.stepMode && stepOverDepth == null && breakpoints.isEmpty()) return
 
-    if (shouldPause) {
-      dbg.stepOverDepth = null
-      val snap = captureSnapshot(pos.line, pos.fileName)
-      when (dbg.onPaused(snap)) {
-        DebugCommand.STEP_INTO -> {
-          dbg.stepMode = true
-        }
-        DebugCommand.STEP_OVER -> {
-          dbg.stepMode = false
-          dbg.stepOverDepth = callStack.size
-        }
-        DebugCommand.CONTINUE -> {
-          dbg.stepMode = false
-        }
-        DebugCommand.STOP -> {
-          throw DebugStopSignal()
-        }
+    val isMainFile = pos.fileName == null || mainFileName == null || pos.fileName == mainFileName
+    val hitBreakpoint = isMainFile && pos.line in breakpoints
+    val hitStepOver = stepOverDepth != null && callStack.size <= stepOverDepth
+    val shouldPause = hitBreakpoint || dbg.stepMode || hitStepOver
+    if (!shouldPause) return
+
+    callStack.lastOrNull()?.currentLine = pos.line
+    dbg.stepOverDepth = null
+    val snap = captureSnapshot(pos.line, pos.fileName)
+    when (dbg.onPaused(snap)) {
+      DebugCommand.STEP_INTO -> {
+        dbg.stepMode = true
+      }
+      DebugCommand.STEP_OVER -> {
+        dbg.stepMode = false
+        dbg.stepOverDepth = callStack.size
+      }
+      DebugCommand.CONTINUE -> {
+        dbg.stepMode = false
+      }
+      DebugCommand.STOP -> {
+        throw DebugStopSignal()
       }
     }
   }
@@ -449,9 +502,12 @@ class SdInterpreter(
           if (existing != null) existing.value = coerceValue(initVal, existing.type)
           else loopScope.declare(stmt.initVarName, MutableBox(initVal, inferRuntimeType(initVal)))
         }
-        while (asBool(evalExpr(stmt.condition, loopScope, env), stmt.pos)) {
+        val condition = createLoopCondition(stmt.condition, loopScope, env)
+        val bodyScope = RuntimeScope(loopScope)
+        while (condition()) {
+          bodyScope.clear()
           try {
-            executeStatements(stmt.body, RuntimeScope(loopScope), env)
+            executeStatements(stmt.body, bodyScope, env)
           } catch (_: NextSignal) {
             // proceed to stepStmt
           } catch (_: BreakSignal) {
@@ -462,9 +518,12 @@ class SdInterpreter(
       }
 
       is Stmt.WhileStmt -> {
-        while (asBool(evalExpr(stmt.condition, scope, env), stmt.pos)) {
+        val condition = createLoopCondition(stmt.condition, scope, env)
+        val bodyScope = RuntimeScope(scope)
+        while (condition()) {
+          bodyScope.clear()
           try {
-            executeStatements(stmt.body, RuntimeScope(scope), env)
+            executeStatements(stmt.body, bodyScope, env)
           } catch (_: NextSignal) {
             continue
           } catch (_: BreakSignal) {

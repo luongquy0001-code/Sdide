@@ -5,8 +5,9 @@ on:
     branches: [ copilot/windows-exe-installer ]
     paths:
       - app/build.gradle.kts
-      - app/src/standalone/**
+      - app/src/**
       - .github/workflows/build-apk.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -62,4 +63,4 @@ jobs:
           tag="sdide-standalone-${GITHUB_RUN_NUMBER}"
           gh release create "$tag" Sd-IDE-Moi-Android.apk \
             --title "Sd IDE Mới (Android) #${GITHUB_RUN_NUMBER}" \
-            --notes "Cài song song với Sd IDE hiện tại. Tên gói: com.aistudio.sdide.kvnqmp.standalone. Dữ liệu ứng dụng tách riêng. Đây là APK debug ký bằng khóa tạm; các bản phát hành sau có thể không cài cập nhật đè lên bản này."
+            --notes "Cài song song với Sd IDE hiện tại. Tên gói: com.aistudio.sdide.kvnqmp.standalone. Dữ liệu ứng dụng tách riêng. Đây là APK debug ký bằng khóa dùng riêng cho lần build này; gỡ bản Sd IDE Mới cũ trước khi cài APK này, nếu không Android có thể từ chối do chữ ký khác."

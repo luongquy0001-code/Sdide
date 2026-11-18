@@ -16,6 +16,7 @@ class ExampleRobolectricTest {
   fun `read string from context and verify repository`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Sd IDE", appName)
+    val expectedName = if (BuildConfig.FLAVOR == "standalone") "Sd IDE Mới" else "Sd IDE"
+    assertEquals(expectedName, appName)
   }
 }

@@ -25,6 +25,7 @@ object SdIdeEngine {
   fun compileAndCheck(
     mainFileName: String,
     projectFiles: Map<String, String>,
+    includeCSource: Boolean = true,
   ): CompilationOutcome {
     val source = projectFiles[mainFileName] ?: ""
     val warnings = mutableListOf<SdDiagnostic>()
@@ -46,7 +47,7 @@ object SdIdeEngine {
       val semWarnings = analyzer.analyze(unit)
       warnings.addAll(semWarnings)
 
-      val cCode = SdCToTranspiler().transpile(unit)
+      val cCode = if (includeCSource) SdCToTranspiler().transpile(unit) else null
       CompilationOutcome(
         unit = unit,
         externalPrograms = parser.importedUnits,
@@ -69,8 +70,9 @@ object SdIdeEngine {
     stdinProvider: StdinProvider = QueueStdinProvider(emptyList()),
     fileBridge: WorkspaceFileBridge = InMemoryFileBridge(),
     debugController: DebugController? = null,
+    includeCSource: Boolean = true,
   ): IdeRunResult {
-    val compiled = compileAndCheck(mainFileName, projectFiles)
+    val compiled = compileAndCheck(mainFileName, projectFiles, includeCSource)
     if (compiled.unit == null || compiled.hasErrors) {
       return IdeRunResult(
         success = false,
@@ -83,6 +85,37 @@ object SdIdeEngine {
     }
 
     val allDiags = compiled.diagnostics.toMutableList()
+    val canUseVm = debugController == null ||
+      (!debugController.stepMode && debugController.stepOverDepth == null && debugController.breakpoints.isEmpty())
+    val vmProgram = if (canUseVm) SdVmCompiler.compile(compiled.unit, compiled.externalPrograms) else null
+    if (vmProgram != null) {
+      val vm = SdVirtualMachine(debugController, mainFileName)
+      return try {
+        val outcome = vm.execute(vmProgram)
+        allDiags.addAll(outcome.warnings)
+        IdeRunResult(
+          success = true,
+          output = outcome.output,
+          exitCode = outcome.exitCode,
+          diagnostics = allDiags.distinct(),
+          finalSnapshot = outcome.finalSnapshot,
+          cSourceCode = compiled.cSourceCode,
+          drawCommands = outcome.drawCommands,
+          terminatedByUser = outcome.terminatedByUser,
+        )
+      } catch (e: SdRuntimeException) {
+        allDiags.add(e.diagnostic)
+        IdeRunResult(
+          success = false,
+          output = vm.currentOutput(),
+          exitCode = -1,
+          diagnostics = allDiags.distinct(),
+          finalSnapshot = null,
+          cSourceCode = compiled.cSourceCode,
+        )
+      }
+    }
+
     val interp = SdInterpreter(
       externalPrograms = compiled.externalPrograms,
       stdinProvider = stdinProvider,

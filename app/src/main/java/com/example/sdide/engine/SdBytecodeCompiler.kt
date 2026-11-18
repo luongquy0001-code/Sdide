@@ -13,7 +13,7 @@ object SdBytecodeCompiler {
   private const val FORMAT_VERSION = 1
 
   fun compile(mainFileName: String, projectFiles: Map<String, String>): ByteArray {
-    val compilation = SdIdeEngine.compileAndCheck(mainFileName, projectFiles)
+    val compilation = SdIdeEngine.compileAndCheck(mainFileName, projectFiles, includeCSource = false)
     if (compilation.unit == null || compilation.hasErrors) {
       throw SdBytecodeCompileException(compilation.diagnostics)
     }
