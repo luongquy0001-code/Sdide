@@ -203,7 +203,7 @@ class SdLexer(
         continue
       }
 
-      // Numbers & Registers (0Ax..0Dx)
+      // Numbers & simulated registers (0Ax..15Nx)
       if (c.isDigit()) {
         tokens.add(readNumberOrRegister(tokLine, tokCol, hadNewline))
         continue
@@ -413,10 +413,22 @@ class SdLexer(
       return SdToken(TokenType.INT_LIT, raw.toString(), startLine, startCol, intVal = value, precededByNewline = hadNewline)
     }
 
-    // Check simulated register like 0Ax, 0Bx, 0Cx, 0Dx (or invalid 0Ex)
-    if (peek() == '0' && peek(1)?.isLetter() == true) {
+    var registerEnd = pos
+    while (source.getOrNull(registerEnd)?.isDigit() == true) registerEnd++
+    val bankText = source.substring(pos, registerEnd)
+    val bank = bankText.toIntOrNull()
+    val slot = source.getOrNull(registerEnd)
+    if (
+      bankText.length in 1..2 &&
+      bank != null &&
+      bank in 0..15 &&
+      slot != null &&
+      slot in 'A'..'N' &&
+      source.getOrNull(registerEnd + 1) == 'x' &&
+      source.getOrNull(registerEnd + 2)?.let { !it.isLetterOrDigit() && it != '_' } != false
+    ) {
       val sb = StringBuilder()
-      while (pos < source.length && (peek()!!.isLetterOrDigit() || peek() == '_')) {
+      while (pos < registerEnd + 2) {
         sb.append(advance())
       }
       return SdToken(TokenType.IDENT, sb.toString(), startLine, startCol, precededByNewline = hadNewline)

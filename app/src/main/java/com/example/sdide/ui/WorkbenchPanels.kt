@@ -86,6 +86,7 @@ fun WorkbenchPanel(
   onClearConsole: () -> Unit,
   onUpdateStdin: (String) -> Unit,
   onSubmitInteractiveStdin: (String) -> Unit,
+  onTerminalCommand: (String) -> Unit,
   onStepInto: () -> Unit,
   onStepOver: () -> Unit,
   onContinue: () -> Unit,
@@ -96,7 +97,7 @@ fun WorkbenchPanel(
   val warnCount = state.diagnostics.count { it.severity == DiagnosticSeverity.WARNING }
 
   val tabs = buildList {
-    add(WorkbenchTab.CONSOLE to "Kết quả")
+    add(WorkbenchTab.CONSOLE to "Terminal")
     val probLabel = when {
       errorCount > 0 -> "Vấn đề ($errorCount!)"
       warnCount > 0 -> "Vấn đề ($warnCount)"
@@ -154,6 +155,7 @@ fun WorkbenchPanel(
           waitingPrompt = state.waitingForStdinPrompt,
           onClear = onClearConsole,
           onSubmitStdin = onSubmitInteractiveStdin,
+          onTerminalCommand = onTerminalCommand,
         )
         WorkbenchTab.PROBLEMS -> ProblemsTabContent(
           diagnostics = state.diagnostics,
@@ -188,8 +190,10 @@ private fun ConsoleTabContent(
   waitingPrompt: String?,
   onClear: () -> Unit,
   onSubmitStdin: (String) -> Unit,
+  onTerminalCommand: (String) -> Unit,
 ) {
   var inlineInput by remember { mutableStateOf("") }
+  var terminalInput by remember { mutableStateOf("") }
   val scrollState = rememberScrollState()
 
   Column(modifier = Modifier.fillMaxSize()) {
@@ -273,7 +277,7 @@ private fun ConsoleTabContent(
       }
     }
 
-    SelectionContainer {
+    SelectionContainer(modifier = Modifier.weight(1f).fillMaxWidth()) {
       Text(
         text = output.ifEmpty { "(Chưa có kết quả in ra)" },
         fontFamily = JetBrainsMonoFamily,
@@ -281,11 +285,36 @@ private fun ConsoleTabContent(
         lineHeight = 20.sp,
         color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
-          .fillMaxSize()
+          .fillMaxWidth()
           .verticalScroll(scrollState)
           .padding(horizontal = 12.dp, vertical = 6.dp)
           .testTag("console_output_text"),
       )
+    }
+
+    if (waitingPrompt == null) {
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        OutlinedTextField(
+          value = terminalInput,
+          onValueChange = { terminalInput = it },
+          label = { Text("sd> nhập lệnh (help)") },
+          singleLine = true,
+          modifier = Modifier.weight(1f).testTag("terminal_command_input"),
+        )
+        IconButton(
+          onClick = {
+            onTerminalCommand(terminalInput)
+            terminalInput = ""
+          },
+          modifier = Modifier.testTag("terminal_submit_button"),
+        ) {
+          Icon(Icons.AutoMirrored.Filled.KeyboardReturn, contentDescription = "Chạy lệnh terminal")
+        }
+      }
     }
   }
 }

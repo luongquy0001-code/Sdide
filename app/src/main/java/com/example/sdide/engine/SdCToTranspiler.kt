@@ -51,8 +51,10 @@ class SdCToTranspiler {
 
   private fun emitProgram(prog: ProgramNode, sb: StringBuilder, fnSuffix: String = "") {
     if (prog.aacMilestones.isNotEmpty() || prog.mainBody.any { it is Stmt.RegLoadStmt }) {
-      sb.appendLine("/* Thanh ghi mo phong CPU: 0Ax..0Dx */")
-      sb.appendLine("static int64_t reg_0Ax = 0, reg_0Bx = 0, reg_0Cx = 0, reg_0Dx = 0;")
+      sb.appendLine("/* Thanh ghi mo phong CPU: 0Ax..15Nx */")
+      SdParser.VALID_REGISTERS.forEach { register ->
+        sb.appendLine("static int64_t reg_$register = 0;")
+      }
       sb.appendLine()
     }
 

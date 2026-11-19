@@ -22,6 +22,11 @@ import com.example.sdide.engine.SdBytecodeCompileException
 import com.example.sdide.engine.SdBytecodeCompiler
 import com.example.sdide.engine.SdDiagnostic
 import com.example.sdide.engine.SdIdeEngine
+import com.example.sdide.engine.SdBackendGenerationException
+import com.example.sdide.engine.SdOptimizationResult
+import com.example.sdide.engine.SdSourceOptimizer
+import com.example.sdide.engine.SdTargetCodeGenerator
+import com.example.sdide.engine.SdTargetLanguage
 import com.example.sdide.engine.StdinProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +38,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 
 enum class WorkbenchTab {
   CONSOLE, PROBLEMS, DEBUGGER, STDIN, DRAW
@@ -66,6 +72,12 @@ data class IdeUiState(
   val scrollToLineRequest: Pair<Int, Long>? = null,
   val preferences: IdePreferences = IdePreferences(),
   val showCViewer: Boolean = false,
+  val showCodeTools: Boolean = false,
+  val targetLanguage: SdTargetLanguage = SdTargetLanguage.C99,
+  val generatedSource: String? = null,
+  val codeGenerationError: String? = null,
+  val isGeneratingCode: Boolean = false,
+  val optimizationPreview: SdOptimizationResult? = null,
   val showCurriculumSheet: Boolean = false,
   val showStorageManager: Boolean = false,
   val dataFiles: List<String> = emptyList(),
@@ -85,6 +97,10 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
   private val undoStacks = HashMap<String, ArrayDeque<TextFieldValue>>()
   private val redoStacks = HashMap<String, ArrayDeque<TextFieldValue>>()
   private var liveCheckJob: Job? = null
+  private var codeGenerationJob: Job? = null
+  private val liveCheckGeneration = AtomicLong()
+  private val codeGenerationGeneration = AtomicLong()
+  private val liveCheckLock = Any()
   private var runJob: Job? = null
   private var activeDebugController: DebugController? = null
   private var activeInteractiveStdinQueue: LinkedBlockingQueue<String>? = null
@@ -122,6 +138,8 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
     val oldText = current.editorValue.text
 
     if (newValue.text != oldText) {
+      codeGenerationGeneration.incrementAndGet()
+      codeGenerationJob?.cancel()
       val undo = undoStacks.getOrPut(file) { ArrayDeque() }
       undo.addLast(current.editorValue)
       if (undo.size > 60) undo.removeFirst()
@@ -135,6 +153,9 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
           editorValue = newValue,
           canUndo = undo.isNotEmpty(),
           canRedo = false,
+          generatedSource = null,
+          codeGenerationError = null,
+          isGeneratingCode = false,
         )
       }
       repo.saveFile(file, newValue.text)
@@ -310,6 +331,126 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
   fun setCViewerVisible(visible: Boolean) {
     _uiState.update { it.copy(showCViewer = visible) }
     if (visible) runStaticCheck()
+  }
+
+  fun setCodeToolsVisible(visible: Boolean) {
+    if (!visible) {
+      codeGenerationGeneration.incrementAndGet()
+      codeGenerationJob?.cancel()
+    }
+    _uiState.update {
+      it.copy(
+        showCodeTools = visible,
+        optimizationPreview = if (visible) it.optimizationPreview else null,
+        isGeneratingCode = if (visible) it.isGeneratingCode else false,
+      )
+    }
+  }
+
+  fun selectTargetLanguage(target: SdTargetLanguage) {
+    if (_uiState.value.targetLanguage == target) return
+    codeGenerationGeneration.incrementAndGet()
+    codeGenerationJob?.cancel()
+    _uiState.update {
+      it.copy(
+        targetLanguage = target,
+        generatedSource = null,
+        codeGenerationError = null,
+        isGeneratingCode = false,
+      )
+    }
+  }
+
+  fun generateTargetCode(target: SdTargetLanguage) {
+    codeGenerationJob?.cancel()
+    val generation = codeGenerationGeneration.incrementAndGet()
+    val snapshot = _uiState.value
+    _uiState.update {
+      it.copy(
+        targetLanguage = target,
+        generatedSource = null,
+        codeGenerationError = null,
+        isGeneratingCode = true,
+      )
+    }
+    val projectFiles = compilationFiles(snapshot.files)
+    codeGenerationJob = viewModelScope.launch(Dispatchers.Default) {
+      try {
+        val outcome = SdIdeEngine.compileAndCheck(snapshot.entryFile, projectFiles, includeCSource = false)
+        val output = when {
+          outcome.hasErrors -> {
+            _uiState.update { current ->
+              if (codeGenerationGeneration.get() == generation &&
+                current.entryFile == snapshot.entryFile && current.files == snapshot.files
+              ) {
+                current.copy(codeGenerationError = outputError(outcome))
+              } else current
+            }
+            null
+          }
+          outcome.unit == null -> {
+            _uiState.update { current ->
+              if (codeGenerationGeneration.get() == generation &&
+                current.entryFile == snapshot.entryFile && current.files == snapshot.files
+              ) {
+                current.copy(codeGenerationError = "Không thể phân tích dự án để sinh mã.")
+              } else current
+            }
+            null
+          }
+          else -> try {
+            SdTargetCodeGenerator.generate(outcome.unit, target, outcome.externalPrograms)
+          } catch (e: SdBackendGenerationException) {
+            _uiState.update { current ->
+              if (codeGenerationGeneration.get() == generation &&
+                current.entryFile == snapshot.entryFile && current.files == snapshot.files
+              ) {
+                current.copy(codeGenerationError = e.message ?: "Backend từ chối tính năng chưa hỗ trợ.")
+              } else current
+            }
+            null
+          }
+        }
+        if (output != null) {
+          _uiState.update { current ->
+            if (codeGenerationGeneration.get() == generation &&
+              current.entryFile == snapshot.entryFile && current.files == snapshot.files
+            ) {
+              current.copy(generatedSource = output, codeGenerationError = null)
+            } else current
+          }
+        }
+      } finally {
+        if (codeGenerationGeneration.get() == generation) {
+          _uiState.update { it.copy(isGeneratingCode = false) }
+        }
+      }
+    }
+  }
+
+  private fun outputError(outcome: com.example.sdide.engine.CompilationOutcome): String =
+    outcome.diagnostics.filter { it.severity == DiagnosticSeverity.ERROR }
+      .joinToString("\n") { it.format() }
+      .ifEmpty { "Không thể phân tích dự án để sinh mã." }
+
+  fun previewSourceOptimization() {
+    val source = _uiState.value.editorValue.text
+    _uiState.update { it.copy(optimizationPreview = SdSourceOptimizer.optimize(source)) }
+  }
+
+  fun dismissSourceOptimizationPreview() {
+    _uiState.update { it.copy(optimizationPreview = null) }
+  }
+
+  fun applySourceOptimization() {
+    val result = _uiState.value.optimizationPreview ?: return
+    if (!result.changed) return
+    val oldValue = _uiState.value.editorValue
+    val cursor = oldValue.selection.start.coerceIn(0, result.optimizedSource.length)
+    onEditorValueChange(
+      TextFieldValue(result.optimizedSource, selection = TextRange(cursor)),
+    )
+    _uiState.update { it.copy(optimizationPreview = null) }
   }
 
   fun setStorageManagerVisible(visible: Boolean) {
@@ -621,26 +762,48 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
   fun runStaticCheck() {
+    val generation = liveCheckGeneration.incrementAndGet()
+    liveCheckJob?.cancel()
     val st = _uiState.value
-    val res = SdIdeEngine.compileAndCheck(
-      st.entryFile,
-      compilationFiles(st.files),
-      includeCSource = st.showCViewer,
-    )
-    _uiState.update {
-      it.copy(
-        diagnostics = res.diagnostics,
-        cSourceCode = res.cSourceCode,
-      )
+    liveCheckJob = viewModelScope.launch(Dispatchers.Default) {
+      val res = synchronized(liveCheckLock) {
+        if (liveCheckGeneration.get() != generation) {
+          null
+        } else {
+          SdIdeEngine.compileAndCheck(
+            st.entryFile,
+            compilationFiles(st.files),
+            includeCSource = st.showCViewer,
+          )
+        }
+      }
+      if (res != null && liveCheckGeneration.get() == generation) {
+        _uiState.update { current ->
+          if (current.entryFile != st.entryFile || current.files != st.files ||
+            current.showCViewer != st.showCViewer
+          ) {
+            current
+          } else {
+            current.copy(
+              diagnostics = res.diagnostics,
+              cSourceCode = res.cSourceCode,
+            )
+          }
+        }
+      }
     }
   }
 
-  fun runProgram(startInDebugStep: Boolean = false) {
+  fun runProgram(
+    startInDebugStep: Boolean = false,
+    entryFileOverride: String? = null,
+    terminalCommand: String? = null,
+  ) {
     if (_uiState.value.isRunning) {
       stopExecution()
     }
     val st = _uiState.value
-    val entryFile = st.entryFile
+    val entryFile = entryFileOverride?.takeIf { it in st.files } ?: st.entryFile
     val projectFilesSnapshot = compilationFiles(st.files)
     val initialStdinLines = st.stdinText
       .split('\n')
@@ -650,7 +813,8 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
     val stdinQueue = LinkedBlockingQueue<String>(initialStdinLines.ifEmpty { emptyList() })
     activeInteractiveStdinQueue = stdinQueue
 
-    val liveOutput = StringBuilder()
+    val commandEcho = terminalCommand?.let { "sd> $it\n" }.orEmpty()
+    val liveOutput = StringBuilder(commandEcho)
     var publishedOutputLength = 0
     var lastOutputPublishNanos = System.nanoTime()
     fun publishLiveOutput(force: Boolean = false) {
@@ -720,7 +884,7 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
         isPausedInDebug = false,
         debugLine = null,
         waitingForStdinPrompt = null,
-        consoleOutput = "",
+        consoleOutput = commandEcho,
         lastExitCode = null,
         lastRunSucceeded = null,
         drawCommands = emptyList(),
@@ -743,6 +907,7 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
         .joinToString("\n") { it.format() }
 
       val finalConsole = buildString {
+        append(commandEcho)
         append(result.output)
         if (errorLogs.isNotEmpty()) {
           if (isNotEmpty() && !endsWith('\n')) append('\n')
@@ -816,5 +981,67 @@ class SdIdeViewModel(application: Application) : AndroidViewModel(application) {
 
   fun clearConsole() {
     _uiState.update { it.copy(consoleOutput = "") }
+  }
+
+  fun executeTerminalCommand(rawCommand: String) {
+    val input = rawCommand.trim()
+    if (input.isEmpty()) return
+    val parts = input.split(Regex("\\s+"))
+    val command = parts.first().lowercase()
+    val argument = parts.getOrNull(1)
+
+    when (command) {
+      "clear" -> clearConsole()
+      "help" -> appendTerminalText(
+        input,
+        "Lệnh cục bộ: help, clear, files, open <tệp>, run [tệp], check, libs, pwd, stop.\n" +
+          "Terminal này điều khiển SD & SDPP; không thực thi lệnh shell của Android.\n",
+      )
+      "files" -> appendTerminalText(
+        input,
+        _uiState.value.files.keys.sorted().joinToString(separator = "\n", postfix = "\n").ifEmpty { "(dự án trống)\n" },
+      )
+      "open" -> {
+        val file = argument
+        if (file == null || file !in _uiState.value.files) {
+          appendTerminalText(input, "Không tìm thấy tệp. Dùng files để xem các tệp trong dự án.\n")
+        } else {
+          switchFile(file)
+          appendTerminalText(input, "Đã mở $file.\n")
+        }
+      }
+      "run" -> {
+        if (_uiState.value.isRunning) {
+          appendTerminalText(input, "Đang có chương trình chạy; dùng stop trước.\n")
+        } else if (argument != null && argument !in _uiState.value.files) {
+          appendTerminalText(input, "Không tìm thấy tệp '$argument'. Dùng files để xem các tệp trong dự án.\n")
+        } else {
+          runProgram(entryFileOverride = argument, terminalCommand = input)
+        }
+      }
+      "check" -> {
+        runStaticCheck()
+        appendTerminalText(input, "Đã kiểm tra mã nguồn; xem tab Vấn đề để đọc chẩn đoán.\n")
+      }
+      "libs" -> {
+        val libraries = _uiState.value.installedLibraries
+          .joinToString(separator = "\n") { "${it.name} ${it.version}" }
+        appendTerminalText(input, libraries.ifEmpty { "Chưa cài thư viện ngoài.\n" })
+      }
+      "pwd" -> appendTerminalText(input, "${repo.storageDirectoryPath()}\n")
+      "stop" -> {
+        stopExecution()
+        appendTerminalText(input, "Đã gửi yêu cầu dừng.\n")
+      }
+      else -> appendTerminalText(input, "Không có lệnh '$command'. Gõ help để xem danh sách.\n")
+    }
+  }
+
+  private fun appendTerminalText(command: String, response: String) {
+    _uiState.update { state ->
+      val combined = "${state.consoleOutput}sd> $command\n$response"
+      val bounded = if (combined.length > 400_000) combined.takeLast(400_000) else combined
+      state.copy(consoleOutput = bounded)
+    }
   }
 }

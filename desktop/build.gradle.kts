@@ -24,6 +24,7 @@ kotlin {
       "**/DesktopEngineTest.kt",
       "**/SdEngineComprehensiveTest.kt",
       "**/SdBytecodeCompilerTest.kt",
+      "**/SdCodeGeneratorTest.kt",
       "**/SdLibraryPackageTest.kt",
       "**/SdLibraryBuildServiceTest.kt",
       "**/DesktopLibraryRepositoryTest.kt",

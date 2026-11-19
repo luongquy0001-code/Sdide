@@ -149,7 +149,7 @@ fun IdeScreen(
           Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Text(
-                text = "Sd IDE",
+                text = "SD & SDPP",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -274,6 +274,13 @@ fun IdeScreen(
                 },
               )
               DropdownMenuItem(
+                text = { Text("Sinh mã và tối ưu ngoại tuyến") },
+                onClick = {
+                  vm.setCodeToolsVisible(true)
+                  showMoreMenu = false
+                },
+              )
+              DropdownMenuItem(
                 text = { Text("Quản lý bộ nhớ và tệp dữ liệu") },
                 onClick = {
                   vm.setStorageManagerVisible(true)
@@ -372,6 +379,7 @@ fun IdeScreen(
               onClearConsole = vm::clearConsole,
               onUpdateStdin = vm::updateStdinText,
               onSubmitInteractiveStdin = vm::submitInteractiveStdin,
+              onTerminalCommand = vm::executeTerminalCommand,
               onStepInto = vm::debugStepInto,
               onStepOver = vm::debugStepOver,
               onContinue = vm::debugContinue,
@@ -439,6 +447,7 @@ fun IdeScreen(
                 onClearConsole = vm::clearConsole,
                 onUpdateStdin = vm::updateStdinText,
                 onSubmitInteractiveStdin = vm::submitInteractiveStdin,
+                onTerminalCommand = vm::executeTerminalCommand,
                 onStepInto = vm::debugStepInto,
                 onStepOver = vm::debugStepOver,
                 onContinue = vm::debugContinue,
@@ -527,6 +536,18 @@ fun IdeScreen(
     CTranspilerDialog(
       cCode = state.cSourceCode,
       onDismiss = { vm.setCViewerVisible(false) },
+    )
+  }
+
+  if (state.showCodeTools) {
+    SdCodeToolsDialog(
+      state = state,
+      onDismiss = { vm.setCodeToolsVisible(false) },
+      onTargetChange = vm::selectTargetLanguage,
+      onGenerate = vm::generateTargetCode,
+      onPreviewOptimization = vm::previewSourceOptimization,
+      onDismissOptimizationPreview = vm::dismissSourceOptimizationPreview,
+      onApplyOptimization = vm::applySourceOptimization,
     )
   }
 }

@@ -12,7 +12,9 @@ class SdParser(
   companion object {
     val STD_LIBS = setOf("ioprt", "math", "mem", "str", "sys", "file", "draw")
     val RESERVED_FLAGS = setOf("$", "₫", "€", "$$", "#", "##")
-    val VALID_REGISTERS = setOf("0Ax", "0Bx", "0Cx", "0Dx")
+    val VALID_REGISTERS: Set<String> = (0..15).flatMap { bank ->
+      ('A'..'N').map { slot -> "${bank}${slot}x" }
+    }.toSet()
     val SWITCH_NAMES = setOf("start", "on", "pause", "off", "stop")
     val KNOWN_TYPES = setOf("int", "float", "str", "bool", "ptr")
   }
@@ -1550,7 +1552,7 @@ class SdParser(
     val startTok = advance() // #{
     val pos = SourcePos(startTok.line, startTok.col, fileName)
     warnings.add(
-      SdDiagnostic("W205", 2, pos.line, pos.col, fileName, "dùng thanh ghi mô phỏng (0Ax–0Dx)", severity = DiagnosticSeverity.WARNING)
+      SdDiagnostic("W205", 2, pos.line, pos.col, fileName, "dùng thanh ghi mô phỏng (0Ax–15Nx)", severity = DiagnosticSeverity.WARNING)
     )
     if (!match(TokenType.HASH) || !match(TokenType.IDENT, "sdbin")) {
       err("E216", peek(), "trong #{ ... }# phải bắt đầu bằng #sdbin:")
@@ -1560,14 +1562,14 @@ class SdParser(
     while (!check(TokenType.HASH) && !check(TokenType.RBRACE_HASH) && !check(TokenType.EOF)) {
       val regTok = expect(TokenType.IDENT, "E217", "thiếu tên thanh ghi trong #sdbin:")
       if (regTok.lexeme !in VALID_REGISTERS) {
-        err("E217", regTok, "tên thanh ghi không hợp lệ '${regTok.lexeme}' (chỉ hỗ trợ 0Ax, 0Bx, 0Cx, 0Dx)")
+        err("E217", regTok, "tên thanh ghi không hợp lệ '${regTok.lexeme}' (hỗ trợ từ 0Ax đến 15Nx)")
       }
       expect(TokenType.LBRACKET, "E216", "thiếu '[' sau tên thanh ghi ${regTok.lexeme}")
       val valExpr = parseExpr()
       expect(TokenType.RBRACKET, "E216", "thiếu ']' đóng dữ liệu thanh ghi")
       loads.add(Stmt.RegLoadStmt(regTok.lexeme, valExpr, SourcePos(regTok.line, regTok.col, fileName)))
-      if (loads.size > 4) {
-        err("E221", regTok, "một lệnh nạp quá 4 thanh ghi cùng lúc")
+      if (loads.size > VALID_REGISTERS.size) {
+        err("E221", regTok, "một lệnh nạp quá ${VALID_REGISTERS.size} thanh ghi cùng lúc")
       }
       match(TokenType.COMMA)
     }
@@ -1600,8 +1602,8 @@ class SdParser(
         err("E217", rTok, "tên thanh ghi không hợp lệ '${rTok.lexeme}'")
       }
       regs.add(rTok.lexeme)
-      if (regs.size > 4) {
-        err("E221", rTok, "một lệnh nx{ } vượt quá 4 thanh ghi")
+      if (regs.size > VALID_REGISTERS.size) {
+        err("E221", rTok, "một lệnh nx{ } vượt quá ${VALID_REGISTERS.size} thanh ghi")
       }
       if (!match(TokenType.COMMA) && !match(TokenType.QUOTE_SEP)) break
     }
@@ -1860,7 +1862,7 @@ class SdParser(
           return Expr.RegExpr(t.lexeme, pos)
         }
         if (t.lexeme.startsWith("0") && t.lexeme.length >= 2 && t.lexeme[1].isLetter()) {
-          err("E217", t, "tên thanh ghi không hợp lệ '${t.lexeme}' (chỉ hỗ trợ 0Ax, 0Bx, 0Cx, 0Dx)")
+          err("E217", t, "tên thanh ghi không hợp lệ '${t.lexeme}' (hỗ trợ từ 0Ax đến 15Nx)")
         }
         // ids(ten).g global variable reference
         if (t.lexeme == "ids" && peek(1).type == TokenType.LPAREN) {

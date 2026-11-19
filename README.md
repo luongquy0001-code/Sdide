@@ -1,4 +1,4 @@
-# Sd IDE
+# SD & SDPP
 
 ## Android files and storage
 
@@ -47,6 +47,24 @@ interpreter. The VM bytecode is currently an in-memory execution format; the
 above. This VM is portable, but it is not native machine code. Both Android and the
 Windows desktop app use the VM where supported and fall back to the interpreter
 for unsupported language features or active debugging.
+
+Interpreter heap bookkeeping is bounded: at most 8,192 live heap blocks and 256
+recently freed blocks are retained for debugger history. Freed block contents
+are released immediately. Interpreter recursion is capped at 128 calls to
+produce a language diagnostic before exhausting the device stack. Static
+diagnostics run away from Android's UI thread, and stale results are discarded
+when the project changes during analysis.
+
+The Sd runtime incrementally sweeps a bounded batch every 64 heap allocations
+and runs a full mark-and-sweep every 1,024 allocations, under allocation
+pressure, at program exit, or on `sys.gc()`. Reachable pointers in active scopes,
+globals, registers, arrays, structs, and heap blocks are retained. The register
+bank now provides 224 simulated registers (`0Ax` through `15Nx`); these remain
+virtual registers and do not access the device CPU.
+
+The Android workbench's Terminal tab accepts local IDE commands (`help`, `files`,
+`open`, `run`, `check`, `libs`, `pwd`, `clear`, and `stop`). It does not execute
+arbitrary Android/Linux shell commands.
 
 ## Offline Sd / Sd++ libraries
 
@@ -103,6 +121,15 @@ word wrapping, plus an optional GCC/Clang executable path and AOT optimization
 level (`-O0`, `-O2`, or `-O3`). Leaving the compiler path blank uses `SD_CC` or
 searches `PATH`; settings are saved for the current Windows user.
 
+The Android IDE's **Sinh mã và tối ưu ngoại tuyến** tool can generate C99,
+JavaScript, Python, or Kotlin from the entry program. JavaScript, Python, and
+Kotlin support scalar variables and parameters, functions, conditionals, loops,
+printing, and selected `math`/`str` calls; unsupported Sd features are reported
+instead of silently omitted. Its source optimizer only proposes identity
+arithmetic simplifications for declared integer variables; review the
+line-by-line diff before applying. Applying a change uses the editor's undo
+history. This is source generation, not a direct binary compiler.
+
 Normal desktop execution skips unused C99 generation and uses the internal VM
 where supported, falling back to the interpreter otherwise. Debugging uses the
 interpreter. The desktop **AOT qua C99** action still invokes installed
@@ -113,7 +140,7 @@ To create a Windows installer, run the **Build Sd IDE Windows installer**
 workflow on GitHub Actions and download the `Sd-IDE-Windows-Installer` artifact.
 The installer is built on Windows and includes its Java runtime.
 
-The standalone Android debug build uses the app name **Sd IDE Mới** and package
+The standalone Android debug build uses the app name **SD & SDPP** and package
 ID `com.aistudio.sdide.kvnqmp.standalone`, so it can be installed alongside the
 existing app. It has separate app data; projects and libraries are not copied
 from the existing installation.

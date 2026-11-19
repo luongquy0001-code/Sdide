@@ -826,6 +826,7 @@ class SdSemanticAnalyzer(
       }
       "sys" -> when (call.name) {
         "time" -> { checkArgCount(call, 0); SdType.IntType }
+        "gc" -> { checkArgCount(call, 0); SdType.IntType }
         "sleep" -> { checkArgCount(call, 1); SdType.VoidType }
         else -> throw SdCompileException(SdDiagnostic("E301", 3, call.pos.line, call.pos.col, fileName, "thư viện sys không có hàm '${call.name}'"))
       }

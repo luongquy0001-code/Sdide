@@ -132,9 +132,14 @@ class SdInterpreter(
   companion object {
     const val MAX_STEPS = 4_000_000L
     const val MAX_OUTPUT_CHARS = 400_000
-    const val MAX_CALL_DEPTH = 800
+    const val MAX_CALL_DEPTH = 128
     const val MAX_REBACK = 65_536
     const val MAX_HEAP_SLOTS = 2_000_000
+    const val MAX_HEAP_BLOCKS = 8_192
+    const val MAX_RETIRED_HEAP_BLOCKS = 256
+    const val GC_DRIP_ALLOCATION_INTERVAL = 64
+    const val GC_DRIP_SWEEP_BLOCKS = 64
+    const val GC_MAJOR_ALLOCATION_INTERVAL = 1_024
   }
 
   private class ReturnSignal(val value: SdValue) : RuntimeException(null, null, false, false)
@@ -144,6 +149,7 @@ class SdInterpreter(
 
   private data class HeapBlock(
     val id: Int,
+    val sizeSlots: Int,
     val slots: MutableList<SdValue>,
     var freed: Boolean = false,
   ) {
@@ -183,17 +189,18 @@ class SdInterpreter(
   private val heap = LinkedHashMap<Int, HeapBlock>()
   private var nextHeapId = 1
   private var totalLiveHeapSlots = 0
+  private var totalLiveHeapBlocks = 0
+  private var allocationsSinceDripCollection = 0
+  private var allocationsSinceMajorCollection = 0
+  private var nextHeapSweepId = 1
 
-  private val registers = LinkedHashMap<String, SdValue?>().apply {
-    put("0Ax", null)
-    put("0Bx", null)
-    put("0Cx", null)
-    put("0Dx", null)
-  }
+  private val registers =
+    SdParser.VALID_REGISTERS.associateWithTo(LinkedHashMap<String, SdValue?>()) { null }
   private val aacManagedRegs = HashMap<String, String>() // varName -> regName
 
   private val globalScope = RuntimeScope(null)
   private val callStack = ArrayDeque<RuntimeFrame>()
+  private val activeScopes = ArrayDeque<RuntimeScope>()
   private var stepCount = 0L
   private var lastExitCode = 0L
 
@@ -229,6 +236,8 @@ class SdInterpreter(
       terminatedByUser = true
     }
 
+    collectHeapGarbage()
+
     // W302 runtime leak check if unfreed heap blocks remain
     val leaked = heap.values.filter { !it.freed }
     if (leaked.isNotEmpty()) {
@@ -239,7 +248,7 @@ class SdInterpreter(
           line = 1,
           col = 1,
           fileName = mainFileName,
-          message = "còn ${leaked.size} vùng nhớ Heap (${leaked.sumOf { it.slots.size }} ô) chưa gọi sta.free khi kết thúc",
+          message = "còn ${leaked.size} vùng nhớ Heap (${leaked.sumOf { it.sizeSlots }} ô) chưa gọi sta.free khi kết thúc",
           severity = DiagnosticSeverity.WARNING,
         )
       )
@@ -304,8 +313,13 @@ class SdInterpreter(
   }
 
   private fun executeStatements(stmts: List<Stmt>, scope: RuntimeScope, env: ModuleEnv) {
-    for (stmt in stmts) {
-      executeStmt(stmt, scope, env)
+    activeScopes.addLast(scope)
+    try {
+      for (stmt in stmts) {
+        executeStmt(stmt, scope, env)
+      }
+    } finally {
+      activeScopes.removeLast()
     }
   }
 
@@ -576,8 +590,8 @@ class SdInterpreter(
         if (block.freed) {
           throw SdRuntimeException(SdDiagnostic("E406", 4, stmt.pos.line, stmt.pos.col, stmt.pos.fileName, "giải phóng hai lần cùng vùng nhớ Heap (double free)"))
         }
-        block.freed = true
-        totalLiveHeapSlots -= block.slots.size
+        retireHeapBlock(block)
+        trimFreedHeapHistory()
       }
 
       is Stmt.RegLoadStmt -> {
@@ -961,14 +975,123 @@ class SdInterpreter(
     if (slots <= 0) {
       throw SdRuntimeException(SdDiagnostic("E407", 4, pos.line, pos.col, pos.fileName, "kích thước sta.alloc phải > 0"))
     }
+    allocationsSinceDripCollection++
+    allocationsSinceMajorCollection++
+    when {
+      allocationsSinceMajorCollection >= GC_MAJOR_ALLOCATION_INTERVAL ->
+        collectHeapGarbage()
+      allocationsSinceDripCollection >= GC_DRIP_ALLOCATION_INTERVAL ->
+        collectHeapGarbage(GC_DRIP_SWEEP_BLOCKS)
+      totalLiveHeapBlocks >= MAX_HEAP_BLOCKS ||
+        totalLiveHeapSlots + slots > MAX_HEAP_SLOTS ->
+        collectHeapGarbage()
+    }
+    if (totalLiveHeapBlocks >= MAX_HEAP_BLOCKS) {
+      throw SdRuntimeException(SdDiagnostic("E407", 4, pos.line, pos.col, pos.fileName, "vượt quá giới hạn $MAX_HEAP_BLOCKS vùng nhớ Heap đang cấp phát"))
+    }
     if (totalLiveHeapSlots + slots > MAX_HEAP_SLOTS) {
       throw SdRuntimeException(SdDiagnostic("E407", 4, pos.line, pos.col, pos.fileName, "hết bộ nhớ Heap mô phỏng (giới hạn $MAX_HEAP_SLOTS ô)"))
     }
     val id = nextHeapId++
     val list = MutableList<SdValue>(slots) { SdValue.IntVal(0L) }
-    heap[id] = HeapBlock(id, list)
+    heap[id] = HeapBlock(id, slots, list)
     totalLiveHeapSlots += slots
+    totalLiveHeapBlocks++
     return SdValue.PtrVal(PtrTarget.HeapSlotRef(id, 0))
+  }
+
+  private fun collectHeapGarbage(maxSweepBlocks: Int? = null): Int {
+    val markedBlocks = HashSet<Int>()
+    val pendingValues = java.util.ArrayDeque<SdValue>()
+    val visitedBoxes = java.util.Collections.newSetFromMap(
+      java.util.IdentityHashMap<MutableBox, Boolean>(),
+    )
+    val visitedContainers = java.util.Collections.newSetFromMap(
+      java.util.IdentityHashMap<Any, Boolean>(),
+    )
+
+    fun markBox(box: MutableBox) {
+      if (visitedBoxes.add(box)) pendingValues.addLast(box.value)
+    }
+    val visitedScopes = java.util.Collections.newSetFromMap(
+      java.util.IdentityHashMap<RuntimeScope, Boolean>(),
+    )
+    fun markScope(scope: RuntimeScope) {
+      var current: RuntimeScope? = scope
+      while (current != null && visitedScopes.add(current)) {
+        current.vars.values.forEach(::markBox)
+        current = current.parent
+      }
+    }
+
+    globalScope.vars.values.forEach(::markBox)
+    activeScopes.forEach(::markScope)
+    callStack.forEach { markScope(it.scope) }
+    registers.values.filterNotNull().forEach(pendingValues::addLast)
+
+    while (pendingValues.isNotEmpty()) {
+      when (val value = pendingValues.removeLast()) {
+        is SdValue.PtrVal -> when (val target = value.target) {
+          is PtrTarget.VarRef -> markBox(target.box)
+          is PtrTarget.HeapSlotRef -> {
+            val block = heap[target.blockId]
+            if (block != null && !block.freed && markedBlocks.add(block.id)) {
+              block.slots.forEach(pendingValues::addLast)
+            }
+          }
+          is PtrTarget.FixedAddrRef, null -> Unit
+        }
+        is SdValue.ArrayVal -> if (visitedContainers.add(value)) {
+          value.elements.forEach(pendingValues::addLast)
+        }
+        is SdValue.StructVal -> if (visitedContainers.add(value)) {
+          value.fields.values.forEach(::markBox)
+        }
+        is SdValue.IntVal, is SdValue.FloatVal, is SdValue.StrVal,
+        is SdValue.BoolVal, SdValue.UnitVal -> Unit
+      }
+    }
+
+    val candidates = heap.values.filterNot { it.freed }
+    if (candidates.isEmpty()) {
+      allocationsSinceDripCollection = 0
+      allocationsSinceMajorCollection = 0
+      return 0
+    }
+    val sweepCount = maxSweepBlocks?.coerceAtMost(candidates.size) ?: candidates.size
+    val startIndex = candidates.indexOfFirst { it.id >= nextHeapSweepId }.let {
+      if (it < 0) 0 else it
+    }
+    var reclaimed = 0
+    repeat(sweepCount) { offset ->
+      val block = candidates[(startIndex + offset) % candidates.size]
+      nextHeapSweepId = block.id + 1
+      if (block.id !in markedBlocks) {
+        retireHeapBlock(block)
+        reclaimed++
+      }
+    }
+    trimFreedHeapHistory()
+    allocationsSinceDripCollection = 0
+    if (maxSweepBlocks == null) allocationsSinceMajorCollection = 0
+    return reclaimed
+  }
+
+  private fun retireHeapBlock(block: HeapBlock) {
+    if (block.freed) return
+    block.freed = true
+    totalLiveHeapSlots -= block.sizeSlots
+    totalLiveHeapBlocks--
+    block.slots.clear()
+  }
+
+  private fun trimFreedHeapHistory() {
+    var freedBlocks = heap.values.count { it.freed }
+    while (freedBlocks > MAX_RETIRED_HEAP_BLOCKS) {
+      val oldestFreedId = heap.entries.firstOrNull { it.value.freed }?.key ?: return
+      heap.remove(oldestFreedId)
+      freedBlocks--
+    }
   }
 
   private fun evalStdCall(mod: String, name: String, args: List<SdValue>, pos: SourcePos): SdValue {
@@ -1024,6 +1147,12 @@ class SdInterpreter(
       }
       "sys" -> when (name) {
         "time" -> SdValue.IntVal(System.currentTimeMillis() / 1000L)
+        "gc" -> {
+          if (args.isNotEmpty()) {
+            throw SdRuntimeException(SdDiagnostic("E304", 4, pos.line, pos.col, pos.fileName, "sys.gc không nhận đối số"))
+          }
+          SdValue.IntVal(collectHeapGarbage().toLong())
+        }
         "sleep" -> {
           val ms = min(asInt(args[0], pos).coerceAtLeast(0L), 5000L)
           try { Thread.sleep(ms) } catch (_: InterruptedException) {}
@@ -1250,7 +1379,7 @@ class SdInterpreter(
     }
     val heapList = heap.values.map { hb ->
       val preview = hb.slots.take(6).joinToString(", ") + if (hb.slots.size > 6) ", ..." else ""
-      HeapBlockSnapshot(hb.id, hb.addressHex, hb.slots.size, hb.freed, preview)
+      HeapBlockSnapshot(hb.id, hb.addressHex, hb.sizeSlots, hb.freed, preview)
     }
     val regList = registers.entries.map { (name, value) ->
       RegisterSnapshot(

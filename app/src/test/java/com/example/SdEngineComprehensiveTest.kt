@@ -180,6 +180,130 @@ class SdEngineComprehensiveTest {
   }
 
   @Test
+  fun freedHeapBlocksDoNotAccumulateDuringLoops() {
+    val result = runSingle(
+      fileName = "heap_loop.sdpp",
+      code = """
+      ssta {
+          imp*mem.$
+          iid: sta(for) => cdn,chck:
+          dbl sta(int i = 0 ' i < 5000 ' i++){
+              iptedt.ptr p = sta.alloc(1) $
+              sta.free(p) $
+          }
+          dbl ed
+          ref*0 $:
+      } ##
+      """.trimIndent(),
+    )
+
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertEquals(256, result.finalSnapshot?.heapBlocks?.size)
+    assertTrue(result.finalSnapshot?.heapBlocks?.all { it.freed } == true)
+    assertFalse(hasCode(result.diagnostics, "W302"))
+  }
+
+  @Test
+  fun dripAndMajorCollectionsReclaimUnreachableHeap() {
+    val result = runSingle(
+      fileName = "gc_loop.sdpp",
+      code = """
+      ssta {
+          imp*mem.$
+          imp*sys.$
+          imp*ioprt.$
+          iid: sta(for) => cdn,chck:
+          dbl sta(int i = 0 ' i < 5000 ' i++){
+              iptedt.ptr p = sta.alloc(1) $
+          }
+          dbl ed
+          iptedt.int reclaimed = sys.gc() $
+          ids.pri: "/d{reclaimed}" $
+          ref*0 $:
+      } ##
+      """.trimIndent(),
+    )
+
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertTrue(result.output.trim().toInt() > 0)
+    assertTrue(result.finalSnapshot?.heapBlocks?.all { it.freed } == true)
+    assertFalse(hasCode(result.diagnostics, "W302"))
+  }
+
+  @Test
+  fun simulatedRegistersExpandAcrossBanksAndSlots() {
+    val result = runSingle(
+      fileName = "registers.sdpp",
+      code = """
+      ssta {
+          imp*ioprt.$
+          #{ #sdbin: 0Nx[1], 1Ax[2], 15Nx[3] # }#
+          :p > sdppbin: int result = nx{0Nx, 1Ax, 15Nx} $
+          ids.pri: "/d{result}" $
+          ref*0 $:
+      } ##
+      """.trimIndent(),
+    )
+
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertEquals("1", result.output.trim())
+    assertEquals(224, com.example.sdide.engine.SdParser.VALID_REGISTERS.size)
+  }
+
+  @Test
+  fun garbageCollectorKeepsPointersInActiveLoopScopesAlive() {
+    val result = runSingle(
+      fileName = "gc_roots.sdpp",
+      code = """
+      ssta {
+          imp*mem.$
+          imp*sys.$
+          imp*ioprt.$
+          iid: sta(for) => cdn,chck:
+          dbl sta(int i = 0 ' i < 1 ' i++){
+              iptedt.ptr kept = sta.alloc(1) $
+              iid: sta(for) => cdn,chck:
+              dbl sta(int j = 0 ' j < 128 ' j++){
+                  iptedt.ptr temporary = sta.alloc(1) $
+              }
+              dbl ed
+              iptedt.int value = *(kept) $
+              iptedt.int reclaimed = sys.gc() $
+              ids.pri: "/d{value}" $
+              sta.free(kept) $
+          }
+          dbl ed
+          ref*0 $:
+      } ##
+      """.trimIndent(),
+    )
+
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertEquals("0", result.output.trim())
+  }
+
+  @Test
+  fun excessiveRecursionReturnsDiagnosticInsteadOfOverflowingRuntimeStack() {
+    val result = runSingle(
+      code = """
+      imp*ioprt.ed
+      iid: sta(fn) => rtn:
+      sta recurse(int depth) -> int {
+          iid: ref* recurse(depth + 1) ed
+      }
+      fn ed
+      sta(main){
+          iid: sta(pri) => recurse(0) ed
+          iid: ref* 0 ed
+      }
+      """.trimIndent(),
+    )
+
+    assertFalse(result.success)
+    assertTrue(result.diagnostics.joinToString { it.format() }, hasCode(result.diagnostics, "E402"))
+  }
+
+  @Test
   fun testHardHaltE409AndRegisterE220AndE218() {
     val hardHalt = runSingle(
       fileName = "halt.sdpp",
