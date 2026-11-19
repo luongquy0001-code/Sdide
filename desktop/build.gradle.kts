@@ -3,7 +3,7 @@ plugins {
   application
 }
 
-version = "1.0.0"
+version = "1.1.0"
 
 dependencies {
   implementation(kotlin("stdlib"))
@@ -28,6 +28,8 @@ kotlin {
       "**/SdLibraryPackageTest.kt",
       "**/SdLibraryBuildServiceTest.kt",
       "**/DesktopLibraryRepositoryTest.kt",
+      "**/PublicGithubSdLibraryClientTest.kt",
+      "**/OfflineCodingAgentTest.kt",
     )
   }
 }
@@ -56,9 +58,9 @@ tasks.register<Exec>("packageWindows") {
   executable = "jpackage"
   args(
     "--type", "exe",
-    "--name", "Sd-IDE",
+    "--name", "SD & SDPP",
     "--app-version", project.version.toString(),
-    "--vendor", "Sd IDE",
+    "--vendor", "SD & SDPP",
     "--input", appDirectory.absolutePath,
     "--main-jar", applicationJar,
     "--main-class", application.mainClass.get(),
@@ -67,6 +69,6 @@ tasks.register<Exec>("packageWindows") {
     "--win-menu",
     "--win-shortcut",
     "--win-dir-chooser",
-    "--win-menu-group", "Sd IDE",
+    "--win-menu-group", "SD & SDPP",
   )
 }

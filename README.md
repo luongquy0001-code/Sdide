@@ -116,6 +116,20 @@ project data-file management, curriculum samples, and a C99 output viewer. Its
 debugger provides breakpoints, step-into, step-over, continue, and stop; editor
 font size and light/dark colors are configurable.
 
+The desktop editor also includes offline C99/JavaScript/Python/Kotlin code
+generation, with unsupported features reported explicitly, and a source
+optimizer that shows a diff before applying changes. `Ctrl+Z`/`Ctrl+Y` undo and
+redo editor changes, including an applied optimization. The offline coding
+agent explains compiler diagnostics and safe local suggestions without sending
+source to a remote service.
+
+The library manager accepts local `.sdlib` packages and public GitHub Release
+asset URLs ending in `.sdlib`. Downloads require HTTPS, are size-limited, and
+are validated and compiled before installation; private repositories are not
+accessed. The runtime exposes only its managed Sd heap and project data APIs;
+it does not read or write memory belonging to other processes or the operating
+system.
+
 Windows also has **Nâng cao…** settings for editor font family, tab width, and
 word wrapping, plus an optional GCC/Clang executable path and AOT optimization
 level (`-O0`, `-O2`, or `-O3`). Leaving the compiler path blank uses `SD_CC` or
@@ -137,8 +151,11 @@ GCC/Clang, and currently cannot compile programs that import user-source
 modules. This is not a self-hosted compiler or direct machine-code backend.
 
 To create a Windows installer, run the **Build Sd IDE Windows installer**
-workflow on GitHub Actions and download the `Sd-IDE-Windows-Installer` artifact.
-The installer is built on Windows and includes its Java runtime.
+workflow on GitHub Actions and download the `SD-and-SDPP-Windows-Installer`
+artifact.
+The installer is built on Windows and includes its Java runtime. The Windows
+package is currently version 1.1.0; native AOT still uses an installed
+GCC/Clang compiler and is not yet a self-hosted Sd compiler.
 
 The standalone Android debug build uses the app name **SD & SDPP** and package
 ID `com.aistudio.sdide.kvnqmp.standalone`, so it can be installed alongside the

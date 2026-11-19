@@ -11,8 +11,14 @@ import com.example.sdide.engine.DiagnosticSeverity
 import com.example.sdide.engine.SdBytecodeCompileException
 import com.example.sdide.engine.SdBytecodeCompiler
 import com.example.sdide.engine.SdIdeEngine
+import com.example.sdide.engine.SdBackendGenerationException
+import com.example.sdide.engine.SdSourceOptimizer
+import com.example.sdide.engine.SdTargetCodeGenerator
+import com.example.sdide.engine.SdTargetLanguage
 import com.example.sdide.engine.StdinProvider
 import com.example.sdide.engine.WorkspaceFileBridge
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -30,8 +36,11 @@ import java.util.Locale
 import java.util.prefs.Preferences
 import java.util.concurrent.Executors
 import javax.swing.JButton
+import javax.swing.AbstractAction
+import javax.swing.JComponent
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
+import javax.swing.JDialog
 import javax.swing.JFileChooser
 import javax.swing.JFrame
 import javax.swing.JLabel
@@ -41,11 +50,15 @@ import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTextArea
 import javax.swing.JTextField
+import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import javax.swing.filechooser.FileFilter
 import javax.swing.filechooser.FileNameExtensionFilter
+import javax.swing.undo.CompoundEdit
+import javax.swing.undo.UndoManager
+import java.util.concurrent.atomic.AtomicLong
 
 fun main() {
   SwingUtilities.invokeLater {
@@ -53,9 +66,11 @@ fun main() {
   }
 }
 
-private class SdIdeDesktop : JFrame("Sd IDE") {
+private class SdIdeDesktop : JFrame("SD & SDPP") {
   private val editor = JTextArea()
+  private val editorUndoManager = UndoManager()
   private val output = JTextArea()
+  private val terminalCommand = JTextField()
   private val filePicker = JComboBox<String>()
   private val status = JLabel(" ")
   private val worker = Executors.newSingleThreadExecutor()
@@ -69,6 +84,8 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
   private var projectDirectory = File(System.getProperty("user.home"), "SdIDE")
   private var activeFile: String? = null
   private var loadingFile = false
+  private var compoundEditorEdit: CompoundEdit? = null
+  private val codeGenerationRequest = AtomicLong()
   private var activeDebugController: DebugController? = null
   private val breakpoints = linkedSetOf<Int>()
   private var editorFontSize = preferences.getInt("fontSize", 14).coerceIn(11, 22)
@@ -118,6 +135,8 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
         add(button("Thư viện", ::manageLibraries))
         add(button("Tệp dữ liệu", ::manageDataFiles))
         add(button("Giáo trình", ::showCurriculum))
+        add(button("Agent offline", ::showOfflineAgent))
+        add(button("Sinh mã + tối ưu", ::showCodeTools))
         add(button("Xem C99", ::showCSource))
         add(button("AOT qua C99", ::compileNative))
         add(button("A−", ::decreaseFontSize))
@@ -139,7 +158,18 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     contentPane.layout = BorderLayout()
     contentPane.add(toolbar, BorderLayout.NORTH)
     contentPane.add(panes, BorderLayout.CENTER)
-    contentPane.add(status, BorderLayout.SOUTH)
+    contentPane.add(
+      JPanel(GridLayout(2, 1)).apply {
+        add(JPanel(BorderLayout(8, 0)).apply {
+          border = javax.swing.BorderFactory.createEmptyBorder(4, 8, 4, 8)
+          add(JLabel("Lệnh IDE (không chạy shell):"), BorderLayout.WEST)
+          add(terminalCommand, BorderLayout.CENTER)
+          add(button("Gửi", ::executeTerminalCommand), BorderLayout.EAST)
+        })
+        add(status)
+      },
+      BorderLayout.SOUTH,
+    )
 
     filePicker.addActionListener {
       if (!loadingFile) {
@@ -150,6 +180,30 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
       override fun insertUpdate(e: DocumentEvent) = onEditorChanged()
       override fun removeUpdate(e: DocumentEvent) = onEditorChanged()
       override fun changedUpdate(e: DocumentEvent) = onEditorChanged()
+    })
+    terminalCommand.addActionListener { executeTerminalCommand() }
+    editor.document.addUndoableEditListener { event ->
+      if (!loadingFile) {
+        (compoundEditorEdit ?: editorUndoManager).addEdit(event.edit)
+      }
+    }
+    editor.getInputMap(JComponent.WHEN_FOCUSED).put(
+      KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK),
+      "sd-undo",
+    )
+    editor.actionMap.put("sd-undo", object : AbstractAction() {
+      override fun actionPerformed(event: java.awt.event.ActionEvent?) {
+        if (editorUndoManager.canUndo()) editorUndoManager.undo()
+      }
+    })
+    editor.getInputMap(JComponent.WHEN_FOCUSED).put(
+      KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK),
+      "sd-redo",
+    )
+    editor.actionMap.put("sd-redo", object : AbstractAction() {
+      override fun actionPerformed(event: java.awt.event.ActionEvent?) {
+        if (editorUndoManager.canRedo()) editorUndoManager.redo()
+      }
     })
     addWindowListener(object : WindowAdapter() {
       override fun windowClosing(e: WindowEvent) {
@@ -351,7 +405,7 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     loadingFile = false
     activeFile = null
     switchToFile(selected)
-    title = "Sd IDE - ${projectDirectory.name}"
+    title = "SD & SDPP - ${projectDirectory.name}"
     status.text = "Dự án: ${projectDirectory.absolutePath}"
   }
 
@@ -364,6 +418,7 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
       return
     }
     loadingFile = true
+    editorUndoManager.discardAllEdits()
     editor.text = file.readText()
     activeFile = fileName
     loadingFile = false
@@ -383,6 +438,116 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     } catch (e: Exception) {
       status.text = "Lỗi lưu tệp: ${e.message ?: e.javaClass.simpleName}"
     }
+  }
+
+  private fun executeTerminalCommand() {
+    val input = terminalCommand.text.trim()
+    terminalCommand.text = ""
+    if (input.isEmpty()) return
+    val parts = input.split(Regex("\\s+"), limit = 2)
+    val command = parts.first().lowercase(Locale.ROOT)
+    val argument = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    when (command) {
+      "clear" -> output.text = ""
+      "help" -> appendTerminalOutput(
+        input,
+        "Lệnh IDE: help, clear, files, open <tệp>, run [tệp], check, libs, pwd, stop.\n" +
+          "Terminal này chỉ điều khiển SD & SDPP, không thực thi lệnh shell.\n",
+      )
+      "files" -> {
+        val names = projectDirectory.listFiles()
+          ?.filter { it.isFile && isSourceFile(it.name) }
+          ?.map { it.name }
+          ?.sortedBy { it.lowercase(Locale.ROOT) }
+          .orEmpty()
+        appendTerminalOutput(input, names.joinToString("\n").ifEmpty { "(dự án trống)" } + "\n")
+      }
+      "open" -> {
+        val file = argument
+        if (file == null || File(file).name != file || !File(projectDirectory, file).isFile ||
+          !isSourceFile(file)
+        ) {
+          appendTerminalOutput(input, "Không tìm thấy tệp nguồn. Dùng files để xem các tệp.\n")
+        } else {
+          switchToFile(file)
+          appendTerminalOutput(input, "Đã mở $file.\n")
+        }
+      }
+      "run" -> {
+        if (stopButton.isEnabled) {
+          appendTerminalOutput(input, "Đang có chương trình chạy; dùng stop trước.\n")
+        } else if (argument != null) {
+          if (File(argument).name != argument || !File(projectDirectory, argument).isFile ||
+            !isSourceFile(argument)
+          ) {
+            appendTerminalOutput(input, "Không tìm thấy tệp nguồn '$argument'.\n")
+          } else {
+            switchToFile(argument)
+            if (activeFile == argument) runProgram()
+          }
+        } else {
+          runProgram()
+        }
+      }
+      "check" -> checkFromTerminal(input)
+      "libs" -> {
+        try {
+          val installed = DesktopLibraryRepository(File(projectDirectory, ".sdide/libraries"))
+            .installedLibraries()
+          appendTerminalOutput(
+            input,
+            installed.joinToString("\n") { "${it.name} ${it.version}" }
+              .ifEmpty { "Chưa cài thư viện ngoài." } + "\n",
+          )
+        } catch (e: IOException) {
+          appendTerminalOutput(input, "Không thể đọc thư viện: ${e.message ?: e.javaClass.simpleName}\n")
+        } catch (e: IllegalArgumentException) {
+          appendTerminalOutput(input, "Gói thư viện không hợp lệ: ${e.message ?: e.javaClass.simpleName}\n")
+        }
+      }
+      "pwd" -> appendTerminalOutput(input, "${projectDirectory.absolutePath}\n")
+      "stop" -> {
+        if (stopButton.isEnabled) {
+          stopExecution()
+          appendTerminalOutput(input, "Đã gửi yêu cầu dừng.\n")
+        } else {
+          appendTerminalOutput(input, "Không có chương trình đang chạy.\n")
+        }
+      }
+      else -> appendTerminalOutput(input, "Không có lệnh '$command'. Gõ help để xem danh sách.\n")
+    }
+  }
+
+  private fun checkFromTerminal(command: String) {
+    val fileName = activeFile ?: return
+    if (!saveCurrentFile()) return
+    val sources = try {
+      compilationSources()
+    } catch (e: IOException) {
+      appendTerminalOutput(command, "Không thể đọc mã nguồn: ${e.message ?: e.javaClass.simpleName}\n")
+      return
+    } catch (e: IllegalArgumentException) {
+      appendTerminalOutput(command, "Thư viện không hợp lệ: ${e.message ?: e.javaClass.simpleName}\n")
+      return
+    }
+    status.text = "Terminal đang kiểm tra $fileName..."
+    worker.submit {
+      val outcome = SdIdeEngine.compileAndCheck(fileName, sources, includeCSource = false)
+      val resultText = if (outcome.diagnostics.isEmpty()) {
+        "Kiểm tra thành công: không có chẩn đoán.\n"
+      } else {
+        outcome.diagnostics.joinToString("\n", postfix = "\n") { it.format() }
+      }
+      SwingUtilities.invokeLater {
+        appendTerminalOutput(command, resultText)
+        status.text = if (outcome.hasErrors) "Kiểm tra thất bại" else "Kiểm tra hoàn tất"
+      }
+    }
+  }
+
+  private fun appendTerminalOutput(command: String, response: String) {
+    output.append("sd> $command\n$response")
+    output.caretPosition = output.document.length
   }
 
   private fun saveCurrentFile(): Boolean {
@@ -591,7 +756,10 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     }
     val installedByLabel = installed.associateBy { "${it.name} ${it.version}" }
     val builtInLabels = SdLibraryCatalog.builtIns.associateBy { "${it.name} — ${it.title}" }
-    val options = listOf("Cài gói .sdlib…", "Đóng gói dự án hiện tại…") +
+    val installFileOption = "Cài gói .sdlib…"
+    val installGithubOption = "Cài .sdlib từ GitHub Releases…"
+    val buildPackageOption = "Đóng gói dự án hiện tại…"
+    val options = listOf(installFileOption, installGithubOption, buildPackageOption) +
       installedByLabel.keys.map { "Gỡ: $it" } +
       builtInLabels.keys.map { "Tích hợp sẵn: $it" }
     val selected = JOptionPane.showInputDialog(
@@ -609,8 +777,9 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     ) as? String ?: return
 
     when {
-      selected == options.first() -> installLibrary(repository)
-      selected == options[1] -> buildLibraryPackage()
+      selected == installFileOption -> installLibrary(repository)
+      selected == installGithubOption -> installLibraryFromGithub(repository)
+      selected == buildPackageOption -> buildLibraryPackage()
       selected.startsWith("Gỡ: ") -> {
         val library = installedByLabel[selected.removePrefix("Gỡ: ")] ?: return
         if (JOptionPane.showConfirmDialog(
@@ -649,12 +818,61 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
     if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return
     try {
       val bytes = chooser.selectedFile.inputStream().use(SdLibraryPackage::readPackageBytes)
-      val library = repository.install(bytes)
+      val libraryInfo = SdLibraryPackage.decode(bytes)
+      val validatedPackage = SdLibraryBuildService.build(libraryInfo)
+      val library = repository.install(validatedPackage)
       status.text = "Đã cài ${library.name} ${library.version}"
     } catch (e: IOException) {
       showError("Không thể đọc gói thư viện: ${e.message ?: e.javaClass.simpleName}")
     } catch (e: IllegalArgumentException) {
       showError("Không thể cài thư viện: ${e.message ?: e.javaClass.simpleName}")
+    }
+  }
+
+  private fun installLibraryFromGithub(repository: DesktopLibraryRepository) {
+    val urlField = JTextField("https://github.com/owner/repository/releases/download/tag/library.sdlib", 56)
+    val panel = JPanel(BorderLayout(0, 8)).apply {
+      add(JLabel("URL tệp .sdlib công khai trong GitHub Releases:"), BorderLayout.NORTH)
+      add(urlField, BorderLayout.CENTER)
+    }
+    if (JOptionPane.showConfirmDialog(
+        this,
+        panel,
+        "Cài thư viện từ GitHub",
+        JOptionPane.OK_CANCEL_OPTION,
+        JOptionPane.PLAIN_MESSAGE,
+      ) != JOptionPane.OK_OPTION
+    ) return
+
+    val assetUri = try {
+      PublicGithubSdLibraryClient.validateReleaseAssetUri(urlField.text)
+    } catch (e: IllegalArgumentException) {
+      showError(e.message ?: "URL GitHub không hợp lệ.")
+      return
+    }
+    status.text = "Đang tải và kiểm tra gói thư viện công khai..."
+    worker.submit {
+      try {
+        val packageBytes = PublicGithubSdLibraryClient.downloadReleaseAsset(assetUri)
+        val libraryInfo = SdLibraryPackage.decode(packageBytes)
+        val validatedPackage = SdLibraryBuildService.build(libraryInfo)
+        val library = repository.install(validatedPackage)
+        SwingUtilities.invokeLater {
+          status.text = "Đã kiểm tra và cài ${library.name} ${library.version} từ GitHub."
+        }
+      } catch (e: IOException) {
+        SwingUtilities.invokeLater {
+          showError("Không thể tải/cài thư viện từ GitHub: ${e.message ?: e.javaClass.simpleName}")
+        }
+      } catch (e: IllegalArgumentException) {
+        SwingUtilities.invokeLater {
+          showError("Gói GitHub không hợp lệ hoặc không biên dịch được: ${e.message ?: e.javaClass.simpleName}")
+        }
+      } catch (e: SecurityException) {
+        SwingUtilities.invokeLater {
+          showError("Không có quyền cài thư viện: ${e.message ?: e.javaClass.simpleName}")
+        }
+      }
     }
   }
 
@@ -871,6 +1089,200 @@ private class SdIdeDesktop : JFrame("Sd IDE") {
           status.text = "Lỗi xem C99"
         }
       }
+    }
+  }
+
+  private fun showCodeTools() {
+    val fileName = activeFile ?: return
+    if (!saveCurrentFile()) return
+
+    val languagePicker = JComboBox(SdTargetLanguage.entries.toTypedArray())
+    val generatedCode = JTextArea().apply {
+      isEditable = false
+      font = editor.font
+      tabSize = editorTabSize
+    }
+    val toolStatus = JLabel("Chọn backend để sinh mã hoặc xem trước tối ưu.")
+    val generateButton = JButton("Sinh mã")
+    val optimizeButton = JButton("Tối ưu nguồn")
+    val dialog = JDialog(this, "Sinh mã và tối ưu — $fileName", false).apply {
+      defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
+      preferredSize = Dimension(820, 620)
+      contentPane.layout = BorderLayout(8, 8)
+      contentPane.add(
+        JPanel(FlowLayout(FlowLayout.LEADING)).apply {
+          add(JLabel("Backend:"))
+          add(languagePicker)
+          add(generateButton)
+          add(optimizeButton)
+        },
+        BorderLayout.NORTH,
+      )
+      contentPane.add(JScrollPane(generatedCode), BorderLayout.CENTER)
+      contentPane.add(toolStatus, BorderLayout.SOUTH)
+      pack()
+      setLocationRelativeTo(this@SdIdeDesktop)
+    }
+
+    generateButton.addActionListener {
+      if (!saveCurrentFile()) return@addActionListener
+      val sources = try {
+        compilationSources()
+      } catch (e: IOException) {
+        showError("Không thể đọc mã nguồn dự án/thư viện: ${e.message ?: e.javaClass.simpleName}")
+        return@addActionListener
+      } catch (e: IllegalArgumentException) {
+        showError("Thư viện không hợp lệ: ${e.message ?: e.javaClass.simpleName}")
+        return@addActionListener
+      }
+      val target = languagePicker.selectedItem as? SdTargetLanguage ?: return@addActionListener
+      val sourceSnapshot = editor.text
+      val request = codeGenerationRequest.incrementAndGet()
+      generateButton.isEnabled = false
+      toolStatus.text = "Đang sinh ${target.displayName}..."
+      generatedCode.text = ""
+
+      worker.submit {
+        val outcome = SdIdeEngine.compileAndCheck(fileName, sources, includeCSource = false)
+        val generated = when {
+          outcome.hasErrors || outcome.unit == null -> null to outcome.diagnostics
+            .joinToString("\n") { it.format() }
+            .ifBlank { "Không thể phân tích dự án để sinh mã." }
+          else -> try {
+            SdTargetCodeGenerator.generate(outcome.unit, target, outcome.externalPrograms) to ""
+          } catch (e: SdBackendGenerationException) {
+            null to (e.message ?: "Backend chưa hỗ trợ tính năng này.")
+          }
+        }
+        SwingUtilities.invokeLater {
+          generateButton.isEnabled = true
+          if (request != codeGenerationRequest.get() ||
+            activeFile != fileName || editor.text != sourceSnapshot || !dialog.isDisplayable
+          ) {
+            return@invokeLater
+          }
+          val (code, error) = generated
+          if (code == null) {
+            generatedCode.text = error
+            toolStatus.text = "Không thể sinh mã cho chương trình hiện tại."
+          } else {
+            generatedCode.text = buildString {
+              if (outcome.diagnostics.isNotEmpty()) {
+                appendLine(outcome.diagnostics.joinToString("\n") { it.format() })
+                appendLine()
+              }
+              append(code)
+            }
+            toolStatus.text = "Đã sinh ${target.displayName} từ $fileName."
+          }
+        }
+      }
+    }
+
+    optimizeButton.addActionListener {
+      val result = SdSourceOptimizer.optimize(editor.text)
+      if (!result.changed) {
+        toolStatus.text = "Không tìm thấy phép tối ưu an toàn nào trong tệp đang mở."
+        return@addActionListener
+      }
+      val diff = result.changes.joinToString("\n\n") { change ->
+        buildString {
+          appendLine("Dòng ${change.line}: ${change.explanation}")
+          appendLine("- ${change.before.trim()}")
+          append(if (change.after.isEmpty()) "+ (xóa dòng)" else "+ ${change.after.trim()}")
+        }
+      }
+      val diffView = JTextArea(diff).apply {
+        isEditable = false
+        font = editor.font
+        lineWrap = true
+        wrapStyleWord = true
+        preferredSize = Dimension(660, 360)
+      }
+      val choice = JOptionPane.showConfirmDialog(
+        dialog,
+        JScrollPane(diffView),
+        "Xem trước ${result.changes.size} thay đổi",
+        JOptionPane.OK_CANCEL_OPTION,
+        JOptionPane.PLAIN_MESSAGE,
+      )
+      if (choice == JOptionPane.OK_OPTION) {
+        replaceEditorTextUndoably(result.optimizedSource)
+        toolStatus.text = "Đã áp dụng. Dùng Ctrl+Z để hoàn tác."
+      }
+    }
+
+    dialog.addWindowListener(object : WindowAdapter() {
+      override fun windowClosing(e: WindowEvent) {
+        codeGenerationRequest.incrementAndGet()
+      }
+    })
+    dialog.isVisible = true
+  }
+
+  private fun showOfflineAgent() {
+    val fileName = activeFile ?: return
+    if (!saveCurrentFile()) return
+    val sources = try {
+      compilationSources()
+    } catch (e: IOException) {
+      showError("Không thể đọc mã nguồn dự án/thư viện: ${e.message ?: e.javaClass.simpleName}")
+      return
+    } catch (e: IllegalArgumentException) {
+      showError("Thư viện không hợp lệ: ${e.message ?: e.javaClass.simpleName}")
+      return
+    }
+
+    status.text = "Agent offline đang phân tích $fileName..."
+    worker.submit {
+      val report = OfflineCodingAgent.review(fileName, sources)
+      val text = buildString {
+        appendLine("Agent cục bộ — mã nguồn không được gửi qua mạng.")
+        appendLine()
+        if (report.findings.isEmpty()) {
+          appendLine("Không tìm thấy lỗi tĩnh.")
+          appendLine("Hãy chạy chương trình và dùng Gỡ lỗi để kiểm tra các đường thực thi.")
+        } else {
+          report.findings.forEach { finding ->
+            appendLine(finding.diagnostic.format())
+            appendLine("Agent gợi ý: ${finding.guidance}")
+            appendLine()
+          }
+        }
+        if (report.safeOptimizationCount > 0) {
+          appendLine("Có ${report.safeOptimizationCount} phép tối ưu an toàn để xem trong Sinh mã + tối ưu.")
+        }
+      }
+      SwingUtilities.invokeLater {
+        if (activeFile != fileName) return@invokeLater
+        val reportView = JTextArea(text).apply {
+          isEditable = false
+          lineWrap = true
+          wrapStyleWord = true
+          font = editor.font
+          caretPosition = 0
+        }
+        JOptionPane.showMessageDialog(
+          this,
+          JScrollPane(reportView),
+          "Agent offline — $fileName",
+          if (report.hasErrors) JOptionPane.WARNING_MESSAGE else JOptionPane.INFORMATION_MESSAGE,
+        )
+        status.text = if (report.hasErrors) "Agent tìm thấy vấn đề cần xem lại" else "Agent hoàn tất phân tích"
+      }
+    }
+  }
+
+  private fun replaceEditorTextUndoably(text: String) {
+    if (editor.text == text) return
+    val compound = CompoundEdit()
+    compoundEditorEdit = compound
+    try {
+      editor.text = text
+    } finally {
+      compoundEditorEdit = null
+      compound.end()
+      editorUndoManager.addEdit(compound)
     }
   }
 

@@ -49,6 +49,6 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Sd-IDE-Windows-Installer
+          name: SD-and-SDPP-Windows-Installer
           path: desktop/build/installer/*.exe
           if-no-files-found: error
