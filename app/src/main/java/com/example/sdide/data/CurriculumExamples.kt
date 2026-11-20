@@ -372,6 +372,51 @@ sta(main){
         """.trimIndent(),
       ),
     ),
+    SampleProject(
+      id = "ch10_bubble_sort",
+      title = "Sắp xếp nổi bọt",
+      chapter = "Chương 10",
+      category = "Thuật toán",
+      description = "Sắp xếp mảng số nguyên tăng dần bằng thuật toán Bubble Sort.",
+      entryFile = "sap_xep_noi_bot.sd",
+      files = linkedMapOf(
+        "sap_xep_noi_bot.sd" to """
+imp*ioprt.ed
+
+sta(main){
+    iid: sta(int mang[7]) => edt: sta(mang = [64 ' 34 ' 25 ' 12 ' 22 ' 11 ' 90]) ed
+    iid: sta(int n) => edt: sta(n = 7) ed
+    iid: sta(int i) ed
+    iid: sta(int j) ed
+    iid: sta(int tam) ed
+
+    iid: sta(for) => cdn,chck:
+    dbl sta(int i = 0 ' i < n - 1 ' i++){
+        iid: sta(for) => cdn,chck:
+        dbl sta(int j = 0 ' j < n - i - 1 ' j++){
+            iid: sta(bolean) => cdn,tf:
+            sta(mang[j] > mang[j + 1]){
+                iid: sta(tam = mang[j]) ed
+                iid: sta(mang[j] = mang[j + 1]) ed
+                iid: sta(mang[j + 1] = tam) ed
+            }
+            bln ed
+        }
+        dbl ed
+    }
+    dbl ed
+
+    iid: sta(pri) => "Mang sau sap xep:" ed
+    iid: sta(for) => cdn,chck:
+    dbl sta(int i = 0 ' i < n ' i++){
+        iid: sta(pri) => "/d{mang[i]} " ed
+    }
+    dbl ed
+    iid: ref* 0 ed
+}
+        """.trimIndent(),
+      ),
+    ),
   )
 
   val cheatsheet: List<SyntaxCheatsheetItem> = listOf(

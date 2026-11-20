@@ -16,6 +16,79 @@ import org.junit.Test
 
 class DesktopEngineTest {
   @Test
+  fun runsAllCurriculumSamplesWithoutFalseDiagnostics() {
+    for (sample in CurriculumExamples.samples) {
+      val result = SdIdeEngine.runProgram(sample.entryFile, sample.files)
+
+      if (sample.id == "ch9_bughunt") {
+        assertFalse(
+          "Bug-hunt sample should intentionally produce diagnostics",
+          result.success,
+        )
+      } else {
+        assertTrue(
+          "Sample '${sample.id}' failed: ${result.diagnostics.joinToString { it.format() }}",
+          result.success,
+        )
+        assertTrue(
+          "Sample '${sample.id}' should produce non-empty output",
+          result.output.isNotBlank(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun acceptsAaCMilestoneOutsideSstaAndMain() {
+    val sdpp = SdIdeEngine.runProgram(
+      "aac_outside.sdpp",
+      mapOf(
+        "aac_outside.sdpp" to """
+          impt*AaC.bin.ed
+          imp*ioprt.$
+          ssta {
+              ids.pri: "AaC ngoai ssta" $
+              ref*0 $:
+          }
+          ##
+        """.trimIndent(),
+      ),
+    )
+    assertTrue(sdpp.diagnostics.joinToString { it.format() }, sdpp.success)
+    assertEquals("AaC ngoai ssta\n", sdpp.output)
+
+    val sdCore = SdIdeEngine.runProgram(
+      "aac_outside.sd",
+      mapOf(
+        "aac_outside.sd" to """
+          impt*AaC.bin.ed
+          imp*ioprt.ed
+          sta(main){
+              iid: sta(pri) => "AaC ngoai sta(main)" ed
+              iid: ref* 0 ed
+          }
+        """.trimIndent(),
+      ),
+    )
+    assertTrue(sdCore.diagnostics.joinToString { it.format() }, sdCore.success)
+    assertEquals("AaC ngoai sta(main)\n", sdCore.output)
+  }
+
+  @Test
+  fun runsBubbleSortSample() {
+    val sample = CurriculumExamples.samples.first { it.id == "ch10_bubble_sort" }
+    val result = SdIdeEngine.runProgram(sample.entryFile, sample.files)
+
+    assertTrue(
+      "Bubble sort failed: ${result.diagnostics.joinToString { it.format() }}",
+      result.success,
+    )
+    assertTrue(result.output.contains("Mang sau sap xep"))
+    val normalizedOutput = result.output.trim().replace(Regex("\\s+"), " ")
+    assertEquals("Mang sau sap xep: 11 12 22 25 34 64 90", normalizedOutput)
+  }
+
+  @Test
   fun runsSharedSdProjectWithTheDesktopEngine() {
     val sample = CurriculumExamples.samples.first()
     val result = SdIdeEngine.runProgram(sample.entryFile, sample.files)

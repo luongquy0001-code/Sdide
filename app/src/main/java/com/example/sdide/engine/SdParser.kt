@@ -61,6 +61,12 @@ class SdParser(
     err(code, t, msg ?: "kỳ vọng '$type' nhưng gặp '${t.lexeme}'")
   }
 
+  private fun expectKeyword(lexeme: String, code: String = "E202", msg: String? = null): SdToken {
+    if (check(TokenType.IDENT, lexeme)) return advance()
+    val t = peek()
+    err(code, t, msg ?: "kỳ vọng '$lexeme' nhưng gặp '${t.lexeme}'")
+  }
+
   fun parseCompilationUnit(): SdCompilationUnit {
     // Check if there is any SEMI token inside braces vs top-level
     val hasTopLevelSemi = hasTopLevelSemicolon()
@@ -286,6 +292,7 @@ class SdParser(
 
   private fun parseSdCoreProgram(preMilestones: List<AaCMilestoneNode>): ProgramNode {
     val imports = mutableListOf<ImportDecl>()
+    val milestones = preMilestones.toMutableList()
     val structs = mutableListOf<StructDecl>()
     val functions = mutableListOf<FnDecl>()
     val voids = mutableListOf<VoidDecl>()
@@ -304,6 +311,16 @@ class SdParser(
         val imp = parseImport()
         imports.add(imp)
         resolveUserImport(imp)
+        continue
+      }
+      if (check(TokenType.IMPT_STAR)) {
+        if (inAaC) {
+          err("E219", t, "hai cột mốc impt*AaC chồng nhau")
+        }
+        val m = parseAaCMilestone()
+        milestones.add(m)
+        inAaC = true
+        aacIsPermanent = m.isPermanent
         continue
       }
       if (check(TokenType.IDENT, "sta") && peek(1).type == TokenType.LPAREN && peek(2).lexeme == "main") {
@@ -352,7 +369,7 @@ class SdParser(
     return ProgramNode(
       isSdpp = false,
       imports = imports,
-      aacMilestones = preMilestones,
+      aacMilestones = milestones,
       structs = structs,
       functions = functions,
       voids = voids,
@@ -368,12 +385,24 @@ class SdParser(
     isPartOfSdAll: Boolean,
     preMilestones: List<AaCMilestoneNode>,
   ): ProgramNode {
-    // Allow pre-ssta imports in .sdpp if any? Textbook puts imp* inside ssta { ... }
+    // Cho phép imp* và impt*AaC đứng trước ssta; các tài liệu có thể đặt
+    // chúng ở ngoài khung hoặc trong ssta.
     val preImports = mutableListOf<ImportDecl>()
-    while (check(TokenType.IMP_STAR)) {
-      val imp = parseImport()
-      preImports.add(imp)
-      resolveUserImport(imp)
+    val preSdppMilestones = preMilestones.toMutableList()
+    while (check(TokenType.IMP_STAR) || check(TokenType.IMPT_STAR)) {
+      if (check(TokenType.IMP_STAR)) {
+        val imp = parseImport()
+        preImports.add(imp)
+        resolveUserImport(imp)
+      } else {
+        if (inAaC) {
+          err("E219", peek(), "hai cột mốc impt*AaC chồng nhau")
+        }
+        val m = parseAaCMilestone()
+        preSdppMilestones.add(m)
+        inAaC = true
+        aacIsPermanent = m.isPermanent
+      }
     }
 
     if (!match(TokenType.IDENT, "ssta")) {
@@ -393,7 +422,7 @@ class SdParser(
     lastAutoClosePosIdx = findLastTopLevelColonAmp(idx)
 
     val imports = preImports
-    val milestones = preMilestones.toMutableList()
+    val milestones = preSdppMilestones
     val defks = mutableListOf<DefkDecl>()
     val globals = mutableListOf<GlobalVarDecl>()
     val structs = mutableListOf<StructDecl>()
@@ -609,7 +638,7 @@ class SdParser(
   }
 
   private fun isInsideAutoCloseRegion(): Boolean {
-    return hasInitEndComand && lastAutoClosePosIdx >= 0 && idx < lastAutoClosePosIdx
+    return hasInitEndComand && lastAutoClosePosIdx >= 0 && idx <= lastAutoClosePosIdx
   }
 
   private fun isStandaloneMirrorStart(): Boolean {
@@ -685,17 +714,17 @@ class SdParser(
   private fun parseAaCMilestone(): AaCMilestoneNode {
     val startTok = advance() // impt*
     val pos = SourcePos(startTok.line, startTok.col, fileName)
-    expect(TokenType.IDENT, "E202") // AaC
+    expectKeyword("AaC")
     expect(TokenType.DOT, "E202")
     var isPermanent = false
     if (match(TokenType.PLUS)) {
       isPermanent = true
-      expect(TokenType.IDENT, "E202") // bin
+      expectKeyword("bin")
       expect(TokenType.DOLLAR, "E201", "cột mốc impt*AaC.+bin$ phải kết thúc bằng $")
     } else {
-      expect(TokenType.IDENT, "E202") // bin
+      expectKeyword("bin")
       expect(TokenType.DOT, "E202")
-      expect(TokenType.IDENT, "E202") // ed
+      expectKeyword("ed")
     }
     return AaCMilestoneNode(isPermanent, pos)
   }
@@ -705,10 +734,10 @@ class SdParser(
     val pos = SourcePos(tok.line, tok.col, fileName)
     expect(TokenType.LT, "E202", "thiếu '<' sau defk")
     // <ids.end: text "¥">
-    expect(TokenType.IDENT, "E202")
-    if (match(TokenType.DOT)) expect(TokenType.IDENT, "E202")
+    expectKeyword("ids")
+    if (match(TokenType.DOT)) expectKeyword("end")
     expect(TokenType.COLON, "E202")
-    expect(TokenType.IDENT, "E202") // text
+    expectKeyword("text")
     val symTok = expect(TokenType.STR_LIT, "E202", "thiếu chuỗi ký hiệu cờ trong defk")
     val sym = symTok.lexeme
     if (sym in RESERVED_FLAGS || sym in sealedFlags) {
@@ -748,9 +777,9 @@ class SdParser(
       // e.g. ids.edt: text = "main"  OR  pri.edt: text = "print"
       val kindTok = expect(TokenType.IDENT, "E202")
       expect(TokenType.DOT, "E202")
-      expect(TokenType.IDENT, "E202") // edt
+      expectKeyword("edt")
       expect(TokenType.COLON, "E202")
-      expect(TokenType.IDENT, "E202") // text
+      expectKeyword("text")
       expect(TokenType.ASSIGN, "E202")
       val valTok = expect(TokenType.STR_LIT, "E202")
       renames[kindTok.lexeme] = valTok.lexeme
@@ -862,9 +891,9 @@ class SdParser(
   private fun parseStructBlock(pos: SourcePos): StructDecl {
     advance(); advance(); advance(); advance() // sta ( struct )
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202", "thiếu thẻ dta") // dta
+    expectKeyword("dta", "E202", "thiếu thẻ dta")
     expect(TokenType.COLON, "E202")
-    expect(TokenType.IDENT, "E202") // sta
+    expectKeyword("sta")
     val nameTok = expect(TokenType.IDENT, "E202", "thiếu tên struct")
     expect(TokenType.LBRACE, "E203")
     val fields = mutableListOf<StructFieldDecl>()
@@ -909,9 +938,9 @@ class SdParser(
   private fun parseFnBlock(pos: SourcePos): FnDecl {
     advance(); advance(); advance(); advance() // sta ( fn )
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202") // rtn
+    expectKeyword("rtn")
     expect(TokenType.COLON, "E202")
-    expect(TokenType.IDENT, "E202") // sta
+    expectKeyword("sta")
     val nameTok = expect(TokenType.IDENT, "E202", "thiếu tên hàm")
     expect(TokenType.LPAREN, "E202")
     val params = parseParamList()
@@ -944,9 +973,9 @@ class SdParser(
   private fun parseVoidBlock(pos: SourcePos): VoidDecl {
     advance(); advance(); advance(); advance() // sta ( void )
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202") // unkw
+    expectKeyword("unkw")
     expect(TokenType.COLON, "E202")
-    expect(TokenType.IDENT, "E202") // sta
+    expectKeyword("sta")
     val nameTok = expect(TokenType.IDENT, "E202", "thiếu tên thủ tục")
     expect(TokenType.LPAREN, "E202")
     val params = parseParamList()
@@ -1198,9 +1227,9 @@ class SdParser(
     if (head.lexeme == "ipt" && peek(1).type == TokenType.RPAREN) {
       advance(); advance()
       expect(TokenType.FAT_ARROW, "E202")
-      expect(TokenType.IDENT, "E202") // edt
+      expectKeyword("edt")
       expect(TokenType.COLON, "E202")
-      expect(TokenType.IDENT, "E202") // sta
+      expectKeyword("sta")
       expect(TokenType.LPAREN, "E202")
       val target = parsePostfix()
       expect(TokenType.RPAREN, "E202")
@@ -1229,9 +1258,9 @@ class SdParser(
       }
       expect(TokenType.RPAREN, "E202")
       if (match(TokenType.FAT_ARROW)) {
-        expect(TokenType.IDENT, "E202") // edt
+        expectKeyword("edt")
         expect(TokenType.COLON, "E202")
-        expect(TokenType.IDENT, "E202") // sta
+        expectKeyword("sta")
         expect(TokenType.LPAREN, "E202")
         expect(TokenType.IDENT, "E202", "thiếu tên biến trong phần edt")
         expect(TokenType.ASSIGN, "E202")
@@ -1263,9 +1292,9 @@ class SdParser(
     if (match(TokenType.RPAREN)) {
       if (match(TokenType.FAT_ARROW)) {
         // Full form: iid: sta(a) => edt: sta(a = expr) ed
-        expect(TokenType.IDENT, "E202") // edt
+        expectKeyword("edt")
         expect(TokenType.COLON, "E202")
-        expect(TokenType.IDENT, "E202") // sta
+        expectKeyword("sta")
         expect(TokenType.LPAREN, "E202")
         val target2 = parsePostfix()
         expect(TokenType.ASSIGN, "E202")
@@ -1292,9 +1321,9 @@ class SdParser(
 
   private fun parseBoleanBlock(pos: SourcePos, inLoop: Boolean, inSb: Boolean, isSdppCtx: Boolean): Stmt.BoleanStmt {
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202") // cdn
+    expectKeyword("cdn")
     expect(TokenType.COMMA, "E202")
-    expect(TokenType.IDENT, "E202") // tf
+    expectKeyword("tf")
     expect(TokenType.COLON, "E202")
 
     val branches = mutableListOf<Stmt.BoleanBranch>()
@@ -1328,15 +1357,13 @@ class SdParser(
 
   private fun parseForBlock(pos: SourcePos, inSb: Boolean, isSdppCtx: Boolean): Stmt.ForStmt {
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202") // cdn
+    expectKeyword("cdn")
     expect(TokenType.COMMA, "E202")
-    expect(TokenType.IDENT, "E202") // chck
+    expectKeyword("chck")
     expect(TokenType.COLON, "E202")
 
-    if (!match(TokenType.IDENT, "dbl")) {
-      err("E202", peek(), "vòng for phải mở thân bằng 'dbl sta(...)'")
-    }
-    expect(TokenType.IDENT, "E202") // sta
+    expectKeyword("dbl", "E202", "vòng for phải mở thân bằng 'dbl sta(...)'")
+    expectKeyword("sta")
     expect(TokenType.LPAREN, "E202")
 
     // Part 1: [type] name = expr
@@ -1389,15 +1416,13 @@ class SdParser(
 
   private fun parseWhileBlock(pos: SourcePos, inSb: Boolean, isSdppCtx: Boolean): Stmt.WhileStmt {
     expect(TokenType.FAT_ARROW, "E202")
-    expect(TokenType.IDENT, "E202") // cdn
+    expectKeyword("cdn")
     expect(TokenType.COMMA, "E202")
-    expect(TokenType.IDENT, "E202") // edt
+    expectKeyword("edt")
     expect(TokenType.COLON, "E202")
 
-    if (!match(TokenType.IDENT, "dbl")) {
-      err("E202", peek(), "vòng while phải mở thân bằng 'dbl sta(...)'")
-    }
-    expect(TokenType.IDENT, "E202") // sta
+    expectKeyword("dbl", "E202", "vòng while phải mở thân bằng 'dbl sta(...)'")
+    expectKeyword("sta")
     expect(TokenType.LPAREN, "E202")
     val cond = parseExprOrDetectAssignInCond()
     expect(TokenType.RPAREN, "E202")

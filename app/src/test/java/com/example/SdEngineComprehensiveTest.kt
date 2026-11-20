@@ -46,6 +46,217 @@ class SdEngineComprehensiveTest {
   }
 
   @Test
+  fun testBookBubbleSortExampleAndForKeywordDiscipline() {
+    val result = runSingle(
+      """
+      imp*ioprt.ed
+      sta(main){
+          iid: sta(int a[5]) => edt: sta(a = [5 ' 2 ' 9 ' 1 ' 7]) ed
+          iid: sta(for) => cdn,chck:
+          dbl sta(int i = 0 ' i < 4 ' i++) {
+              iid: sta(for) => cdn,chck:
+              dbl sta(int j = 0 ' j < 4 - i ' j++) {
+                  iid: sta(bolean) => cdn,tf:
+                  sta(a[j] > a[j + 1]) {
+                      iid: sta(int t) => edt: sta(t = a[j]) ed
+                      iid: sta(a[j] = a[j + 1]) ed
+                      iid: sta(a[j + 1] = t) ed
+                  }
+                  bln ed
+              }
+              dbl ed
+          }
+          dbl ed
+          iid: sta(for) => cdn,chck:
+          dbl sta(int k = 0 ' k < 5 ' k++) {
+              iid: sta(pri) => "a[/d{k}] = /d{a[k]}" ed
+          }
+          dbl ed
+          iid: ref* 0 ed
+      }
+      """.trimIndent(),
+    )
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertEquals(
+      "a[0] = 1\na[1] = 2\na[2] = 5\na[3] = 7\na[4] = 9\n",
+      result.output,
+    )
+
+    val misspelledHeader = runSingle(
+      """
+      sta(main){
+          iid: sta(for) => cdn,chk:
+          dbl sta(int i = 0 ' i < 1 ' i++) {
+          }
+          dbl ed
+          iid: ref* 0 ed
+      }
+      """.trimIndent(),
+    )
+    assertFalse(misspelledHeader.success)
+    assertTrue(misspelledHeader.diagnostics.joinToString { it.format() }.contains("kỳ vọng 'chck'"))
+  }
+
+  @Test
+  fun testStdlibCallInsideFormatStringReportsWrongArity() {
+    val result = runSingle(
+      """
+      imp*ioprt.ed
+      imp*str.ed
+      sta(main){
+          iid: sta(pri) => "length = /d{str.len()}" ed
+          iid: ref* 0 ed
+      }
+      """.trimIndent(),
+    )
+
+    assertFalse(result.success)
+    assertTrue(hasCode(result.diagnostics, "E304"))
+    assertTrue(result.diagnostics.joinToString { it.format() }.contains("str.len: cần 1 đối số, nhận 0"))
+  }
+
+  @Test
+  fun testBookAutoCloseAndRebackExamples() {
+    val autoClose = runSingle(
+      """
+      ssta {
+          imp*ioprt.$
+          init.endcomand: ":&" $
+          ids.g: lan = 3
+          ids.pri: "Xin chao"
+          ids.pri: "Gia tri: /d{lan}"
+          :&
+      }
+      ##
+      """.trimIndent(),
+      fileName = "test.sdpp",
+    )
+    assertTrue(autoClose.diagnostics.joinToString { it.format() }, autoClose.success)
+    assertEquals("Xin chao\nGia tri: 3\n", autoClose.output)
+
+    val reback = runSingle(
+      """
+      ssta {
+          imp*ioprt.$
+          define[
+              ids.edt: text = "main",
+              pri.edt: text = "print"
+          ]{
+              main: {
+                  iptedt.int temp = -25 $
+                  ids sb(temp) {
+                      block temp > 0:
+                          ids.pri: "On dinh: /d{temp}" $
+                          transf $
+                      block temp < 0:
+                          ids.pri: "Am (/d{temp}), dang suoi" $
+                          temp = temp + 20 $
+                          $$
+                      remaining:
+                          ids.pri: "Bang 0, dua ve 1" $
+                          temp = 1 $
+                          $$
+                  } $
+                  ref*0 $:
+              } $
+          } €
+      }
+      ##
+      """.trimIndent(),
+      fileName = "test.sdpp",
+    )
+    assertTrue(reback.diagnostics.joinToString { it.format() }, reback.success)
+    assertEquals(
+      "Am (-25), dang suoi\nAm (-5), dang suoi\nOn dinh: 15\n",
+      reback.output,
+    )
+  }
+
+  @Test
+  fun testAaCMilestoneAcceptedBeforeSstaAndBeforeMain() {
+    val sdppOutside = runSingle(
+      """
+      impt*AaC.bin.ed
+      imp*ioprt.$
+      ssta {
+          ids.pri: "AaC ngoai ssta" $
+          ref*0 $:
+      }
+      ##
+      """.trimIndent(),
+      fileName = "aac_outside.sdpp",
+    )
+    assertTrue(
+      sdppOutside.diagnostics.joinToString { it.format() },
+      sdppOutside.success,
+    )
+    assertEquals("AaC ngoai ssta\n", sdppOutside.output)
+
+    val sdCoreOutside = runSingle(
+      """
+      impt*AaC.bin.ed
+      imp*ioprt.ed
+      sta(main){
+          iid: sta(pri) => "AaC ngoai sta(main)" ed
+          iid: ref* 0 ed
+      }
+      """.trimIndent(),
+      fileName = "aac_outside.sd",
+    )
+    assertTrue(
+      sdCoreOutside.diagnostics.joinToString { it.format() },
+      sdCoreOutside.success,
+    )
+    assertEquals("AaC ngoai sta(main)\n", sdCoreOutside.output)
+  }
+
+  @Test
+  fun testSdppBuiltInsAndAaCMilestoneOutsideMain() {
+    val result = runSingle(
+      """
+      ssta {
+          impt*AaC.bin.ed
+          define[
+              ids.edt: text = "main",
+              pri.edt: text = "print"
+          ]{
+              main: {
+                  iptedt.ptr h = sta.alloc(1) $
+                  ids.pri: "Sd++ I/O and heap built-ins" $
+                  sta.free(h) $
+                  ref*0 $:
+              } $
+          } €
+      }
+      ##
+      """.trimIndent(),
+      fileName = "test.sdpp",
+    )
+    assertTrue(result.diagnostics.joinToString { it.format() }, result.success)
+    assertEquals("Sd++ I/O and heap built-ins\n", result.output)
+
+    val explicitLibrary = runSingle(
+      """
+      ssta {
+          define[
+              ids.edt: text = "main",
+              pri.edt: text = "print"
+          ]{
+              main: {
+                  iptedt.float p = math.pow(2 ' 10) $
+                  ref*0 $:
+              } $
+          } €
+      }
+      ##
+      """.trimIndent(),
+      fileName = "test.sdpp",
+    )
+    assertFalse(explicitLibrary.success)
+    assertTrue(hasCode(explicitLibrary.diagnostics, "E205"))
+  }
+
+  @Test
   fun testStringSlashSlashAndE104() {
     val ok = runSingle(
       """
