@@ -48,8 +48,8 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Build standalone APK
-        run: gradle :app:testStandaloneDebugUnitTest :app:assembleStandaloneDebug
+      - name: Test Sd engine and build standalone APK
+        run: gradle :app:testStandaloneDebugUnitTest --tests com.example.SdEngineComprehensiveTest :app:assembleStandaloneDebug
 
       - name: Prepare APK file
         run: |
