@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bold geometric Sd & Sd++ emblem centered inside 66dp safe zone (21..87) -->
+    <!-- Top-left orange 'S' block -->
+    <path
+        android:fillColor="#FF5722"
+        android:pathData="M28,28 H51 V36 H36 V42 H51 V52 H28 V44 H43 V38 H28 Z" />
+    <!-- Top-right steel 'd' / bracket block -->
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M57,28 H72 C77,28 80,31 80,36 V44 C80,49 77,52 72,52 H57 Z M65,35 V45 H71 C72.5,45 73,44 73,42.5 V37.5 C73,36 72.5,35 71,35 Z" />
+    <!-- Bottom-left lime '+' block -->
+    <path
+        android:fillColor="#76FF03"
+        android:pathData="M36,56 H43 V64 H51 V71 H43 V79 H36 V71 H28 V64 H36 Z" />
+    <!-- Bottom-right amber '+' / chevron block -->
+    <path
+        android:fillColor="#FACC15"
+        android:pathData="M65,56 H72 V64 H80 V71 H72 V79 H65 V71 H57 V64 H65 Z" />
+</vector>
