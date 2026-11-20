@@ -562,8 +562,7 @@ class SdInterpreter(
                   continue@outer
                 }
                 Stmt.SbAction.TRANSF -> {
-                  // Continue inspecting remaining branches in this pass
-                  continue
+                  break@outer
                 }
                 Stmt.SbAction.BREAK, Stmt.SbAction.NONE -> {
                   break@outer
@@ -1095,6 +1094,48 @@ class SdInterpreter(
   }
 
   private fun evalStdCall(mod: String, name: String, args: List<SdValue>, pos: SourcePos): SdValue {
+    val expectedArgCount = when (mod) {
+      "math" -> when (name) {
+        "abs", "sqrt" -> 1
+        "pow", "max", "min" -> 2
+        else -> null
+      }
+      "str" -> when (name) {
+        "len", "upper", "lower" -> 1
+        "concat" -> 2
+        else -> null
+      }
+      "mem" -> when (name) {
+        "alloc" -> 1
+        "memset" -> 3
+        else -> null
+      }
+      "sys" -> when (name) {
+        "time", "gc" -> 0
+        "sleep" -> 1
+        else -> null
+      }
+      "file" -> when (name) {
+        "read" -> 1
+        "write" -> 2
+        else -> null
+      }
+      "draw" -> if (name == "rect") 4 else null
+      else -> null
+    }
+    if (expectedArgCount != null && args.size != expectedArgCount) {
+      throw SdRuntimeException(
+        SdDiagnostic(
+          "E304",
+          4,
+          pos.line,
+          pos.col,
+          pos.fileName,
+          "$mod.$name: cần $expectedArgCount đối số, nhận ${args.size}",
+        )
+      )
+    }
+
     return when (mod) {
       "math" -> when (name) {
         "abs" -> when (val v = args[0]) {

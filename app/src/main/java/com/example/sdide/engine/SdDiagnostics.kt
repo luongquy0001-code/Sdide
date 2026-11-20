@@ -56,7 +56,7 @@ object SdErrorCatalog {
     ErrorCatalogEntry("E202", "Pha 2: Cú pháp", "Lệnh lạ hoặc khối chưa khép", "Lệnh không nhận dạng, thiếu chốt khối (bln/dbl/strt/void/fn ed) hoặc khép sai loại.", "4, 16"),
     ErrorCatalogEntry("E203", "Pha 2: Cú pháp", "Thiếu hoặc thừa dấu }", "Cặp ngoặc nhọn { } mở và đóng không khớp.", "9"),
     ErrorCatalogEntry("E204", "Pha 2: Cú pháp", "Thiếu main hoặc thiếu ref*", "Chương trình thiếu khung main hoặc khung main không kết thúc bằng ref*.", "1, 9"),
-    ErrorCatalogEntry("E205", "Pha 2: Cú pháp", "Dùng thư viện chưa imp*", "Gọi pri/ipt hoặc hàm thư viện chuẩn (math, str, file, mem, sys, draw) khi chưa nạp.", "15"),
+    ErrorCatalogEntry("E205", "Pha 2: Cú pháp", "Dùng thư viện chưa imp*", "Trong Sd, pri/ipt cần imp*ioprt; các thư viện chuẩn cần được nạp. Sd++ có sẵn I/O và heap; math, str, file, sys, draw vẫn cần imp*.", "15"),
     ErrorCatalogEntry("E206", "Pha 2: Cú pháp", "Đầu vòng for thiếu mục", "Vòng for bắt buộc có đủ 3 mục ngăn bằng dấu nháy đơn ': khởi tạo ' điều kiện ' bước.", "5"),
     ErrorCatalogEntry("E207", "Pha 2: Cú pháp", "Hàm thiếu ref* cuối cùng", "Hàm fn có kiểu trả về nhưng câu lệnh cuối ở cấp ngoài cùng không phải ref*.", "7"),
     ErrorCatalogEntry("E208", "Pha 2: Cú pháp", "Sd++ thiếu ssta hoặc ##", "Chương trình Sd++ thiếu nắp mở ssta { hoặc nắp đóng ## ở cuối (hoặc cuối ngăn .sdall).", "10, 23"),

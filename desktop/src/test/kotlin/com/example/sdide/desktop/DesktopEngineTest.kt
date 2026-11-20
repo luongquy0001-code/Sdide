@@ -46,6 +46,21 @@ class DesktopEngineTest {
       ),
     )
     assertTrue(sdCore.diagnostics.joinToString { it.format() }, sdCore.success)
+
+    val mixedCaseAaC = SdIdeEngine.runProgram(
+      "mixed_case.sdpp",
+      mapOf(
+        "mixed_case.sdpp" to """
+          ssta {
+              impt*Aac.bin.ed
+              x:& = 7
+              ids.pri: "/d{*m(x)}" $
+              ref*0 $:
+          } ##
+        """.trimIndent(),
+      ),
+    )
+    assertTrue(mixedCaseAaC.diagnostics.joinToString { it.format() }, mixedCaseAaC.success)
   }
 
   @Test

@@ -106,7 +106,9 @@ class SdSemanticAnalyzer(
     loadedRegs: MutableMap<String, SourcePos>,
     sharedGlobals: Scope?,
   ) {
-    val importedLibs = program.imports.map { it.name }.toSet()
+    // Sd++ has console I/O and heap operations as built-ins; other stdlibs stay explicit.
+    val importedLibs = program.imports.map { it.name }.toSet() +
+      if (program.isSdpp) setOf("ioprt", "mem") else emptySet()
     val structs = LinkedHashMap<String, SdType.StructType>()
     val functions = LinkedHashMap<String, FnSignature>()
     val voids = LinkedHashMap<String, VoidSignature>()

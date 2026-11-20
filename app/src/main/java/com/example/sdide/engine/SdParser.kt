@@ -314,7 +314,7 @@ class SdParser(
         continue
       }
       if (check(TokenType.IMPT_STAR)) {
-        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+        if (peek(1).type == TokenType.IDENT && !peek(1).lexeme.equals("AaC", ignoreCase = true)) {
           val imp = parseImport()
           imports.add(imp)
           resolveUserImport(imp)
@@ -401,7 +401,7 @@ class SdParser(
         preImports.add(imp)
         resolveUserImport(imp)
       } else {
-        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+        if (peek(1).type == TokenType.IDENT && !peek(1).lexeme.equals("AaC", ignoreCase = true)) {
           val imp = parseImport()
           preImports.add(imp)
           resolveUserImport(imp)
@@ -505,7 +505,7 @@ class SdParser(
 
       // impt*AaC...
       if (check(TokenType.IMPT_STAR)) {
-        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+        if (peek(1).type == TokenType.IDENT && !peek(1).lexeme.equals("AaC", ignoreCase = true)) {
           val imp = parseImport()
           imports.add(imp)
           resolveUserImport(imp)
@@ -732,7 +732,11 @@ class SdParser(
   private fun parseAaCMilestone(): AaCMilestoneNode {
     val startTok = advance() // impt*
     val pos = SourcePos(startTok.line, startTok.col, fileName)
-    expectKeyword("AaC")
+    val aacKeyword = peek()
+    if (aacKeyword.type != TokenType.IDENT || !aacKeyword.lexeme.equals("AaC", ignoreCase = true)) {
+      err("E202", aacKeyword, "sau impt* cần từ khóa 'AaC'")
+    }
+    advance()
     expect(TokenType.DOT, "E202")
     var isPermanent = false
     if (match(TokenType.PLUS)) {
