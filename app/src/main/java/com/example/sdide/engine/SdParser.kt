@@ -314,6 +314,12 @@ class SdParser(
         continue
       }
       if (check(TokenType.IMPT_STAR)) {
+        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+          val imp = parseImport()
+          imports.add(imp)
+          resolveUserImport(imp)
+          continue
+        }
         if (inAaC) {
           err("E219", t, "hai cột mốc impt*AaC chồng nhau")
         }
@@ -395,6 +401,12 @@ class SdParser(
         preImports.add(imp)
         resolveUserImport(imp)
       } else {
+        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+          val imp = parseImport()
+          preImports.add(imp)
+          resolveUserImport(imp)
+          continue
+        }
         if (inAaC) {
           err("E219", peek(), "hai cột mốc impt*AaC chồng nhau")
         }
@@ -493,6 +505,12 @@ class SdParser(
 
       // impt*AaC...
       if (check(TokenType.IMPT_STAR)) {
+        if (peek(1).type == TokenType.IDENT && peek(1).lexeme != "AaC") {
+          val imp = parseImport()
+          imports.add(imp)
+          resolveUserImport(imp)
+          continue
+        }
         if (inAaC) {
           err("E219", t, "hai cột mốc impt*AaC chồng nhau")
         }
@@ -657,7 +675,7 @@ class SdParser(
   }
 
   private fun parseImport(): ImportDecl {
-    val startTok = advance() // imp*
+    val startTok = advance() // imp* or accepted impt* compatibility form
     val pos = SourcePos(startTok.line, startTok.col, fileName)
     val nameTok = expect(TokenType.IDENT, "E202", "thiếu tên thư viện sau imp*")
     var isSdppFlag = false

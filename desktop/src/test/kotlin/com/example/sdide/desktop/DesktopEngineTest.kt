@@ -16,6 +16,85 @@ import org.junit.Test
 
 class DesktopEngineTest {
   @Test
+  fun acceptsImptIoprtCompatibilityAndAllBookAaCForms() {
+    val sdpp = SdIdeEngine.runProgram(
+      "compat.sdpp",
+      mapOf(
+        "compat.sdpp" to """
+          impt*ioprt.$
+          impt*AaC.bin.ed
+          ssta {
+              x:& = 128
+              ids.pri: "/d{*m(x)}" $
+              ref*0 $:
+          } ##
+        """.trimIndent(),
+      ),
+    )
+    assertTrue(sdpp.diagnostics.joinToString { it.format() }, sdpp.success)
+
+    val sdCore = SdIdeEngine.runProgram(
+      "compat.sd",
+      mapOf(
+        "compat.sd" to """
+          impt*ioprt.ed
+          sta(main){
+              iid: sta(pri) => "Compat I/O" ed
+              iid: ref* 0 ed
+          }
+        """.trimIndent(),
+      ),
+    )
+    assertTrue(sdCore.diagnostics.joinToString { it.format() }, sdCore.success)
+  }
+
+  @Test
+  fun acceptsBookAaCFormsWithoutE202() {
+    val inside = """
+      ssta {
+          imp*ioprt.$
+          impt*AaC.bin.ed
+          x:& = 128
+          y:& = 256
+          ids.pri: "/d{*m(x)} /d{*m(y)}" $
+          ref*0 $:
+      } ##
+    """.trimIndent()
+    val insideResult = SdIdeEngine.runProgram("inside.sdpp", mapOf("inside.sdpp" to inside))
+    assertTrue(insideResult.diagnostics.joinToString { it.format() }, insideResult.success)
+
+    val permanent = """
+      impt*AaC.+bin$
+      imp*ioprt.$
+      ssta {
+          x:& = 128
+          ids.pri: "/d{*m(x)}" $
+          ref*0 $:
+      } ##
+    """.trimIndent()
+    val permanentResult = SdIdeEngine.runProgram("permanent.sdpp", mapOf("permanent.sdpp" to permanent))
+    assertTrue(permanentResult.diagnostics.joinToString { it.format() }, permanentResult.success)
+
+    val sdall = """
+      start imp*ioprt.ed
+      impt*AaC.bin.ed
+      sta(main){
+          iid: sta(pri) => "AaC .sdall" ed
+          iid: ref* 0 ed
+      }
+      ;
+      on ssta {
+          imp*ioprt.$
+          impt*AaC.bin.ed
+          ids.pri: "AaC ssta .sdall" $
+          ref*0 $:
+      } ##
+    """.trimIndent()
+    val sdallResult = SdIdeEngine.runProgram("chain.sdall", mapOf("chain.sdall" to sdall))
+    assertTrue(sdallResult.diagnostics.joinToString { it.format() }, sdallResult.success)
+  }
+
+  @Test
   fun runsAllCurriculumSamplesWithoutFalseDiagnostics() {
     for (sample in CurriculumExamples.samples) {
       val result = SdIdeEngine.runProgram(sample.entryFile, sample.files)
